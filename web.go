@@ -14,6 +14,7 @@ const leaderboardHTML = `
     <title>Battleship Arena - Leaderboard</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/brackets-viewer@latest/dist/brackets-viewer.min.css" />
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
@@ -114,17 +115,54 @@ const leaderboardHTML = `
             font-size: 0.9em;
             margin-top: 20px;
         }
+        .bracket-section {
+            margin: 40px 0;
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+        }
+        .bracket-section h2 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
     </style>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/brackets-viewer@latest/dist/brackets-viewer.min.js"></script>
     <script>
         // Auto-refresh every 30 seconds
         setTimeout(() => location.reload(), 30000);
+        
+        // Load and render bracket data
+        window.addEventListener('DOMContentLoaded', async () => {
+            try {
+                const response = await fetch('/api/bracket');
+                const data = await response.json();
+                
+                if (data.matches && data.matches.length > 0) {
+                    window.bracketsViewer.render({
+                        stages: data.stages,
+                        matches: data.matches,
+                        matchGames: data.matchGames,
+                        participants: data.participants,
+                    });
+                }
+            } catch (error) {
+                console.error('Failed to load bracket data:', error);
+            }
+        });
     </script>
 </head>
 <body>
     <div class="container">
         <h1>🚢 Battleship Arena</h1>
-        <p class="subtitle">Smart AI Competition Leaderboard</p>
+        <p class="subtitle">Smart AI Competition</p>
         
+        <div class="bracket-section">
+            <h2>⚔️ Tournament Bracket</h2>
+            <div class="brackets-viewer"></div>
+        </div>
+        
+        <h2 style="text-align: center; color: #333; margin-top: 60px;">📊 Rankings</h2>
         <table>
             <thead>
                 <tr>
@@ -233,13 +271,21 @@ func handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 	if entries == nil {
 		entries = []LeaderboardEntry{}
 	}
+	
+	// Get matches for bracket
+	matches, err := getAllMatches()
+	if err != nil {
+		matches = []MatchResult{}
+	}
 
 	data := struct {
 		Entries      []LeaderboardEntry
+		Matches      []MatchResult
 		TotalPlayers int
 		TotalGames   int
 	}{
 		Entries:      entries,
+		Matches:      matches,
 		TotalPlayers: len(entries),
 		TotalGames:   calculateTotalGames(entries),
 	}
@@ -263,6 +309,92 @@ func handleAPILeaderboard(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(entries)
+}
+
+func handleBracketData(w http.ResponseWriter, r *http.Request) {
+	matches, err := getAllMatches()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load matches: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if matches == nil {
+		matches = []MatchResult{}
+	}
+
+	// Get unique participants
+	participantMap := make(map[string]int)
+	participants := []map[string]interface{}{}
+	participantID := 1
+
+	for _, match := range matches {
+		if _, exists := participantMap[match.Player1Username]; !exists {
+			participantMap[match.Player1Username] = participantID
+			participants = append(participants, map[string]interface{}{
+				"id":   participantID,
+				"name": match.Player1Username,
+			})
+			participantID++
+		}
+		if _, exists := participantMap[match.Player2Username]; !exists {
+			participantMap[match.Player2Username] = participantID
+			participants = append(participants, map[string]interface{}{
+				"id":   participantID,
+				"name": match.Player2Username,
+			})
+			participantID++
+		}
+	}
+
+	// Create match data in brackets-viewer format
+	bracketMatches := []map[string]interface{}{}
+	for i, match := range matches {
+		opponent1 := map[string]interface{}{
+			"id":     participantMap[match.Player1Username],
+			"result": "loss",
+		}
+		opponent2 := map[string]interface{}{
+			"id":     participantMap[match.Player2Username],
+			"result": "loss",
+		}
+
+		if match.WinnerUsername == match.Player1Username {
+			opponent1["result"] = "win"
+		} else {
+			opponent2["result"] = "win"
+		}
+
+		bracketMatches = append(bracketMatches, map[string]interface{}{
+			"id":         i + 1,
+			"stage_id":   1,
+			"group_id":   1,
+			"round_id":   1,
+			"number":     i + 1,
+			"opponent1":  opponent1,
+			"opponent2":  opponent2,
+			"status":     "completed",
+		})
+	}
+
+	// Create stage data
+	stages := []map[string]interface{}{
+		{
+			"id":     1,
+			"name":   "Round Robin",
+			"type":   "round_robin",
+			"number": 1,
+		},
+	}
+
+	data := map[string]interface{}{
+		"stages":       stages,
+		"matches":      bracketMatches,
+		"matchGames":   []map[string]interface{}{},
+		"participants": participants,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
 }
 
 func calculateTotalGames(entries []LeaderboardEntry) int {

@@ -29,7 +29,7 @@ func initialModel(username string, width, height int) model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(loadLeaderboard, loadSubmissions(m.username), loadMatches, tickCmd())
+	return tea.Batch(loadLeaderboard, loadSubmissions(m.username), tickCmd())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -46,10 +46,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.leaderboard = msg.entries
 	case submissionsMsg:
 		m.submissions = msg.submissions
-	case matchesMsg:
-		m.matches = msg.matches
 	case tickMsg:
-		return m, tea.Batch(loadLeaderboard, loadSubmissions(m.username), loadMatches, tickCmd())
+		return m, tea.Batch(loadLeaderboard, loadSubmissions(m.username), tickCmd())
 	}
 	return m, nil
 }
@@ -72,12 +70,6 @@ func (m model) View() string {
 	// Show submissions
 	if len(m.submissions) > 0 {
 		b.WriteString(renderSubmissions(m.submissions))
-		b.WriteString("\n")
-	}
-
-	// Show bracket-style matches
-	if len(m.matches) > 0 {
-		b.WriteString(renderBracket(m.matches))
 		b.WriteString("\n")
 	}
 
@@ -196,9 +188,9 @@ func renderLeaderboard(entries []LeaderboardEntry) string {
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Bold(true).Render("🏆 Leaderboard") + "\n\n")
 
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("240"))
-	b.WriteString(headerStyle.Render(fmt.Sprintf("%-4s %-20s %8s %8s %10s\n", 
-		"Rank", "User", "Wins", "Losses", "Win Rate")))
+	// Header without styling on the whole line
+	b.WriteString(fmt.Sprintf("%-4s %-20s %8s %8s %10s\n", 
+		"Rank", "User", "Wins", "Losses", "Win Rate"))
 
 	for i, entry := range entries {
 		winRate := 0.0
@@ -208,19 +200,22 @@ func renderLeaderboard(entries []LeaderboardEntry) string {
 		}
 
 		rank := fmt.Sprintf("#%d", i+1)
-		line := fmt.Sprintf("%-4s %-20s %8d %8d %9.2f%%\n",
-			rank, entry.Username, entry.Wins, entry.Losses, winRate)
-
-		style := lipgloss.NewStyle()
+		
+		// Apply color only to the rank
+		var coloredRank string
 		if i == 0 {
-			style = style.Foreground(lipgloss.Color("220")) // Gold
+			coloredRank = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Render(rank) // Gold
 		} else if i == 1 {
-			style = style.Foreground(lipgloss.Color("250")) // Silver
+			coloredRank = lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Render(rank) // Silver
 		} else if i == 2 {
-			style = style.Foreground(lipgloss.Color("208")) // Bronze
+			coloredRank = lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Render(rank) // Bronze
+		} else {
+			coloredRank = rank
 		}
-
-		b.WriteString(style.Render(line))
+		
+		// Format line with proper spacing, only rank is colored
+		b.WriteString(fmt.Sprintf("%-4s %-20s %8d %8d %9.2f%%\n",
+			coloredRank, entry.Username, entry.Wins, entry.Losses, winRate))
 	}
 
 	return b.String()
@@ -228,43 +223,85 @@ func renderLeaderboard(entries []LeaderboardEntry) string {
 
 func renderBracket(matches []MatchResult) string {
 	var b strings.Builder
-	b.WriteString(lipgloss.NewStyle().Bold(true).Render("⚔️  Recent Matches") + "\n\n")
+	b.WriteString(lipgloss.NewStyle().Bold(true).Render("⚔️  Tournament Bracket") + "\n\n")
 
 	if len(matches) == 0 {
 		return b.String()
 	}
 
-	// Show most recent matches (up to 10)
-	displayCount := len(matches)
-	if displayCount > 10 {
-		displayCount = 10
+	// Group matches by matchup pairs
+	matchups := make(map[string]MatchResult)
+	for _, match := range matches {
+		// Create a consistent key regardless of order
+		key := match.Player1Username + " vs " + match.Player2Username
+		reverseKey := match.Player2Username + " vs " + match.Player1Username
+		
+		// Check if we already have this matchup
+		if _, exists := matchups[reverseKey]; !exists {
+			matchups[key] = match
+		}
 	}
 
-	for i := 0; i < displayCount; i++ {
-		match := matches[i]
-		
-		// Determine styling based on winner
-		player1Style := lipgloss.NewStyle()
-		player2Style := lipgloss.NewStyle()
-		
-		if match.WinnerUsername == match.Player1Username {
-			player1Style = player1Style.Foreground(lipgloss.Color("green")).Bold(true)
-			player2Style = player2Style.Foreground(lipgloss.Color("240"))
-		} else {
-			player2Style = player2Style.Foreground(lipgloss.Color("green")).Bold(true)
-			player1Style = player1Style.Foreground(lipgloss.Color("240"))
+	// Display up to 8 matchups in bracket format
+	count := 0
+	for _, match := range matchups {
+		if count >= 8 {
+			break
 		}
 		
-		// Format: [Player1] ──vs── [Player2]  →  Winner (avg moves)
-		player1Str := player1Style.Render(fmt.Sprintf("%-15s", match.Player1Username))
-		vsStr := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(" ──vs── ")
-		player2Str := player2Style.Render(fmt.Sprintf("%-15s", match.Player2Username))
+		// Determine winner styling
+		player1Style := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+		player2Style := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+		winnerBox := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("green")).
+			Bold(true).
+			Border(lipgloss.RoundedBorder()).
+			Padding(0, 1)
 		
-		winnerMark := "→"
-		winnerStr := lipgloss.NewStyle().Foreground(lipgloss.Color("green")).Render(
-			fmt.Sprintf("%s %s wins (avg %d moves)", winnerMark, match.WinnerUsername, match.AvgMoves))
+		var winner string
+		if match.WinnerUsername == match.Player1Username {
+			player1Style = player1Style.Foreground(lipgloss.Color("green")).Bold(true)
+			winner = match.Player1Username
+		} else {
+			player2Style = player2Style.Foreground(lipgloss.Color("green")).Bold(true)
+			winner = match.Player2Username
+		}
 		
-		b.WriteString(fmt.Sprintf("%s%s%s  %s\n", player1Str, vsStr, player2Str, winnerStr))
+		// Format bracket style
+		// Player1  ┐
+		//          ├── Winner
+		// Player2  ┘
+		
+		player1Box := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			Padding(0, 1).
+			Width(15)
+		
+		player2Box := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			Padding(0, 1).
+			Width(15)
+		
+		p1 := player1Box.Render(player1Style.Render(match.Player1Username))
+		connector1 := "  ┐"
+		middle := "   ├──"
+		connector2 := "  ┘"
+		p2 := player2Box.Render(player2Style.Render(match.Player2Username))
+		winnerStr := winnerBox.Render(fmt.Sprintf("%s wins", winner))
+		
+		b.WriteString(p1 + connector1 + "\n")
+		b.WriteString(strings.Repeat(" ", 17) + middle + " " + winnerStr + "\n")
+		b.WriteString(p2 + connector2 + "\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(
+			fmt.Sprintf("                        (avg %d moves)\n", match.AvgMoves)))
+		b.WriteString("\n")
+		
+		count++
+	}
+
+	if len(matchups) > 8 {
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(
+			fmt.Sprintf("... and %d more matches\n", len(matchups)-8)))
 	}
 
 	return b.String()

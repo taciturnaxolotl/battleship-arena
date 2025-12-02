@@ -112,6 +112,7 @@ func startWebServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleLeaderboard)
 	mux.HandleFunc("/api/leaderboard", handleAPILeaderboard)
+	mux.HandleFunc("/api/bracket", handleBracketData)
 	
 	log.Printf("Web server starting on :%s", webPort)
 	if err := http.ListenAndServe(":"+webPort, mux); err != nil {
