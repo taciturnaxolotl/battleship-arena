@@ -15,6 +15,7 @@ type model struct {
 	height       int
 	submissions  []Submission
 	leaderboard  []LeaderboardEntry
+	matches      []MatchResult
 }
 
 func initialModel(username string, width, height int) model {
@@ -28,7 +29,7 @@ func initialModel(username string, width, height int) model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(loadLeaderboard, loadSubmissions(m.username), tickCmd())
+	return tea.Batch(loadLeaderboard, loadSubmissions(m.username), loadMatches, tickCmd())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -45,8 +46,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.leaderboard = msg.entries
 	case submissionsMsg:
 		m.submissions = msg.submissions
+	case matchesMsg:
+		m.matches = msg.matches
 	case tickMsg:
-		return m, tea.Batch(loadLeaderboard, loadSubmissions(m.username), tickCmd())
+		return m, tea.Batch(loadLeaderboard, loadSubmissions(m.username), loadMatches, tickCmd())
 	}
 	return m, nil
 }
@@ -69,6 +72,12 @@ func (m model) View() string {
 	// Show submissions
 	if len(m.submissions) > 0 {
 		b.WriteString(renderSubmissions(m.submissions))
+		b.WriteString("\n")
+	}
+
+	// Show bracket-style matches
+	if len(m.matches) > 0 {
+		b.WriteString(renderBracket(m.matches))
 		b.WriteString("\n")
 	}
 
@@ -108,6 +117,18 @@ func loadSubmissions(username string) tea.Cmd {
 		}
 		return submissionsMsg{submissions: submissions}
 	}
+}
+
+type matchesMsg struct {
+	matches []MatchResult
+}
+
+func loadMatches() tea.Msg {
+	matches, err := getAllMatches()
+	if err != nil {
+		return matchesMsg{matches: nil}
+	}
+	return matchesMsg{matches: matches}
 }
 
 type tickMsg time.Time
@@ -200,6 +221,50 @@ func renderLeaderboard(entries []LeaderboardEntry) string {
 		}
 
 		b.WriteString(style.Render(line))
+	}
+
+	return b.String()
+}
+
+func renderBracket(matches []MatchResult) string {
+	var b strings.Builder
+	b.WriteString(lipgloss.NewStyle().Bold(true).Render("⚔️  Recent Matches") + "\n\n")
+
+	if len(matches) == 0 {
+		return b.String()
+	}
+
+	// Show most recent matches (up to 10)
+	displayCount := len(matches)
+	if displayCount > 10 {
+		displayCount = 10
+	}
+
+	for i := 0; i < displayCount; i++ {
+		match := matches[i]
+		
+		// Determine styling based on winner
+		player1Style := lipgloss.NewStyle()
+		player2Style := lipgloss.NewStyle()
+		
+		if match.WinnerUsername == match.Player1Username {
+			player1Style = player1Style.Foreground(lipgloss.Color("green")).Bold(true)
+			player2Style = player2Style.Foreground(lipgloss.Color("240"))
+		} else {
+			player2Style = player2Style.Foreground(lipgloss.Color("green")).Bold(true)
+			player1Style = player1Style.Foreground(lipgloss.Color("240"))
+		}
+		
+		// Format: [Player1] ──vs── [Player2]  →  Winner (avg moves)
+		player1Str := player1Style.Render(fmt.Sprintf("%-15s", match.Player1Username))
+		vsStr := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(" ──vs── ")
+		player2Str := player2Style.Render(fmt.Sprintf("%-15s", match.Player2Username))
+		
+		winnerMark := "→"
+		winnerStr := lipgloss.NewStyle().Foreground(lipgloss.Color("green")).Render(
+			fmt.Sprintf("%s %s wins (avg %d moves)", winnerMark, match.WinnerUsername, match.AvgMoves))
+		
+		b.WriteString(fmt.Sprintf("%s%s%s  %s\n", player1Str, vsStr, player2Str, winnerStr))
 	}
 
 	return b.String()

@@ -51,6 +51,13 @@ func (h *validatingHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, e
 		return 0, err
 	}
 
+	// Remove old file if it exists to ensure clean overwrite
+	targetPath := filepath.Join(userDir, filename)
+	if _, err := os.Stat(targetPath); err == nil {
+		log.Printf("Removing old file: %s", targetPath)
+		os.Remove(targetPath)
+	}
+
 	// Modify the entry to write to user's subdirectory
 	userEntry := &scp.FileEntry{
 		Name:   filepath.Join(s.User(), filename),

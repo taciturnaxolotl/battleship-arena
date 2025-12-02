@@ -4,3 +4,11 @@ submissions/
 battleship-arena
 *.log
 build/
+
+# Generated files in engine
+battleship-engine/src/memory_functions_*.cpp
+battleship-engine/src/memory_functions_*.h
+battleship-engine/src/match_*.cpp
+battleship-engine/build/
+
+scripts/test-submissions/memory_functions_klukas.cpp

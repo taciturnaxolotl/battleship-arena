@@ -66,6 +66,12 @@ func (h *sftpFileHandler) Filewrite(r *sftp.Request) (io.WriterAt, error) {
 	dstPath := filepath.Join(h.baseDir, filename)
 	log.Printf("SFTP: Creating file %s for user %s", dstPath, h.username)
 	
+	// Remove old file if it exists to ensure clean overwrite
+	if _, err := os.Stat(dstPath); err == nil {
+		log.Printf("SFTP: Removing old file: %s", dstPath)
+		os.Remove(dstPath)
+	}
+	
 	flags := r.Pflags()
 	var osFlags int
 	if flags.Creat {
