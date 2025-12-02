@@ -68,7 +68,15 @@ func (h *validatingHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, e
 	}
 
 	log.Printf("Uploaded %s from %s (%d bytes)", filename, s.User(), n)
-	addSubmission(s.User(), filename)
+	
+	// Add submission and trigger testing
+	submissionID, err := addSubmission(s.User(), filename)
+	if err != nil {
+		log.Printf("Failed to add submission: %v", err)
+	} else {
+		log.Printf("Queued submission %d for testing", submissionID)
+		// The worker will pick it up automatically
+	}
 	
 	return n, nil
 }

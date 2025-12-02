@@ -138,6 +138,7 @@ const leaderboardHTML = `
                 </tr>
             </thead>
             <tbody>
+                {{if .Entries}}
                 {{range $i, $e := .Entries}}
                 <tr>
                     <td class="rank rank-{{add $i 1}}">{{if lt $i 3}}{{medal $i}}{{else}}#{{add $i 1}}{{end}}</td>
@@ -147,6 +148,13 @@ const leaderboardHTML = `
                     <td class="win-rate {{winRateClass $e}}">{{winRate $e}}%</td>
                     <td>{{printf "%.1f" $e.AvgMoves}}</td>
                     <td>{{$e.LastPlayed.Format "Jan 2, 3:04 PM"}}</td>
+                </tr>
+                {{end}}
+                {{else}}
+                <tr>
+                    <td colspan="7" style="text-align: center; padding: 40px; color: #999;">
+                        No submissions yet. Be the first to compete!
+                    </td>
                 </tr>
                 {{end}}
             </tbody>
@@ -217,8 +225,13 @@ func formatFloat(f float64, decimals int) string {
 func handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 	entries, err := getLeaderboard(50)
 	if err != nil {
-		http.Error(w, "Failed to load leaderboard", http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to load leaderboard: %v", err), http.StatusInternalServerError)
 		return
+	}
+
+	// Empty leaderboard is fine
+	if entries == nil {
+		entries = []LeaderboardEntry{}
 	}
 
 	data := struct {
@@ -231,14 +244,21 @@ func handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 		TotalGames:   calculateTotalGames(entries),
 	}
 
-	tmpl.Execute(w, data)
+	if err := tmpl.Execute(w, data); err != nil {
+		http.Error(w, fmt.Sprintf("Template error: %v", err), http.StatusInternalServerError)
+	}
 }
 
 func handleAPILeaderboard(w http.ResponseWriter, r *http.Request) {
 	entries, err := getLeaderboard(50)
 	if err != nil {
-		http.Error(w, "Failed to load leaderboard", http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to load leaderboard: %v", err), http.StatusInternalServerError)
 		return
+	}
+
+	// Empty leaderboard is fine
+	if entries == nil {
+		entries = []LeaderboardEntry{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

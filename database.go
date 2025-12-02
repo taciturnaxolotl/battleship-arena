@@ -26,7 +26,7 @@ type Submission struct {
 }
 
 func initDB(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", path)
+	db, err := sql.Open("sqlite3", path+"?parseTime=true")
 	if err != nil {
 		return nil, err
 	}
@@ -83,10 +83,15 @@ func getLeaderboard(limit int) ([]LeaderboardEntry, error) {
 	var entries []LeaderboardEntry
 	for rows.Next() {
 		var e LeaderboardEntry
-		err := rows.Scan(&e.Username, &e.Wins, &e.Losses, &e.AvgMoves, &e.LastPlayed)
+		var lastPlayed string
+		err := rows.Scan(&e.Username, &e.Wins, &e.Losses, &e.AvgMoves, &lastPlayed)
 		if err != nil {
 			return nil, err
 		}
+		
+		// Parse the timestamp string
+		e.LastPlayed, _ = time.Parse("2006-01-02 15:04:05", lastPlayed)
+		
 		entries = append(entries, e)
 	}
 
@@ -120,6 +125,29 @@ func updateSubmissionStatus(id int, status string) error {
 func getPendingSubmissions() ([]Submission, error) {
 	rows, err := globalDB.Query(
 		"SELECT id, username, filename, upload_time, status FROM submissions WHERE status = 'pending' ORDER BY upload_time",
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var submissions []Submission
+	for rows.Next() {
+		var s Submission
+		err := rows.Scan(&s.ID, &s.Username, &s.Filename, &s.UploadTime, &s.Status)
+		if err != nil {
+			return nil, err
+		}
+		submissions = append(submissions, s)
+	}
+
+	return submissions, rows.Err()
+}
+
+func getUserSubmissions(username string) ([]Submission, error) {
+	rows, err := globalDB.Query(
+		"SELECT id, username, filename, upload_time, status FROM submissions WHERE username = ? ORDER BY upload_time DESC LIMIT 10",
+		username,
 	)
 	if err != nil {
 		return nil, err

@@ -157,7 +157,15 @@ func (f *fileWriterAt) Close() error {
 	err := f.file.Close()
 	if err == nil {
 		log.Printf("SFTP: Uploaded %s from %s", f.filename, f.username)
-		addSubmission(f.username, f.filename)
+		
+		// Add submission and trigger testing
+		submissionID, err := addSubmission(f.username, f.filename)
+		if err != nil {
+			log.Printf("Failed to add submission: %v", err)
+		} else {
+			log.Printf("Queued submission %d for testing", submissionID)
+			// The worker will pick it up automatically
+		}
 	}
 	return err
 }

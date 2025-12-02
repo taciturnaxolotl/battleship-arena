@@ -8,8 +8,13 @@ import (
 
 // Background worker that processes pending submissions
 func startWorker(ctx context.Context) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
+
+	// Process immediately on start
+	if err := processSubmissions(); err != nil {
+		log.Printf("Worker error: %v", err)
+	}
 
 	for {
 		select {

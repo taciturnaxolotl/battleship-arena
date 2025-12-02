@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,21 +12,6 @@ import (
 
 const battleshipRepoPath = "/Users/kierank/code/school/cs1210-battleship"
 
-func queueSubmission(username string) error {
-	// Find the user's submission file
-	files, err := filepath.Glob(filepath.Join(uploadDir, username, "memory_functions_*.cpp"))
-	if err != nil {
-		return err
-	}
-	if len(files) == 0 {
-		return fmt.Errorf("no submission file found")
-	}
-
-	filename := filepath.Base(files[0])
-	_, err = addSubmission(username, filename)
-	return err
-}
-
 func processSubmissions() error {
 	submissions, err := getPendingSubmissions()
 	if err != nil {
@@ -33,10 +19,15 @@ func processSubmissions() error {
 	}
 
 	for _, sub := range submissions {
+		log.Printf("Starting test for submission %d: %s by %s", sub.ID, sub.Filename, sub.Username)
+		
 		if err := testSubmission(sub); err != nil {
+			log.Printf("Submission %d failed: %v", sub.ID, err)
 			updateSubmissionStatus(sub.ID, "failed")
 			continue
 		}
+		
+		log.Printf("Submission %d completed successfully: %s by %s", sub.ID, sub.Filename, sub.Username)
 		updateSubmissionStatus(sub.ID, "completed")
 	}
 
@@ -44,12 +35,14 @@ func processSubmissions() error {
 }
 
 func testSubmission(sub Submission) error {
+	log.Printf("Setting submission %d to testing status", sub.ID)
 	updateSubmissionStatus(sub.ID, "testing")
 
 	// Copy submission to battleship repo
 	srcPath := filepath.Join(uploadDir, sub.Username, sub.Filename)
 	dstPath := filepath.Join(battleshipRepoPath, "src", sub.Filename)
 
+	log.Printf("Copying %s to %s", srcPath, dstPath)
 	input, err := os.ReadFile(srcPath)
 	if err != nil {
 		return err
@@ -70,6 +63,7 @@ func testSubmission(sub Submission) error {
 	buildDir := filepath.Join(battleshipRepoPath, "build")
 	os.MkdirAll(buildDir, 0755)
 
+	log.Printf("Compiling submission %d for student %s", sub.ID, studentID)
 	// Compile using the light version for testing
 	cmd := exec.Command("g++", "-std=c++11", "-O3",
 		"-o", filepath.Join(buildDir, "battle_"+studentID),
@@ -82,6 +76,7 @@ func testSubmission(sub Submission) error {
 		return fmt.Errorf("compilation failed: %s", output)
 	}
 
+	log.Printf("Running benchmark for submission %d (100 games)", sub.ID)
 	// Run benchmark tests (100 games)
 	cmd = exec.Command(filepath.Join(buildDir, "battle_"+studentID), "--benchmark", "100")
 	output, err = cmd.CombinedOutput()
@@ -90,6 +85,7 @@ func testSubmission(sub Submission) error {
 	}
 
 	// Parse results and store in database
+	log.Printf("Parsing results for submission %d", sub.ID)
 	results := parseResults(string(output))
 	for opponent, result := range results {
 		addResult(sub.ID, opponent, result.Result, result.Moves)
