@@ -1,0 +1,6 @@
+.ssh/
+submissions/
+*.db
+battleship-arena
+*.log
+build/
