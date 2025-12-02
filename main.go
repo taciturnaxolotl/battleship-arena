@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/wish"
 	"github.com/charmbracelet/wish/bubbletea"
 	"github.com/charmbracelet/wish/logging"
+	"github.com/charmbracelet/wish/scp"
 )
 
 const (
@@ -40,12 +41,14 @@ func main() {
 	// Start web server
 	go startWebServer()
 
-	// Start SSH server with TUI
+	// Start SSH server with TUI, SCP, and SFTP
+	toClient, fromClient := newSCPHandlers()
 	s, err := wish.NewServer(
 		wish.WithAddress(host + ":" + sshPort),
 		wish.WithHostKeyPath(".ssh/battleship_arena"),
+		wish.WithSubsystem("sftp", sftpHandler),
 		wish.WithMiddleware(
-			scpMiddleware(),
+			scp.Middleware(toClient, fromClient),
 			bubbletea.Middleware(teaHandler),
 			logging.Middleware(),
 		),
@@ -76,6 +79,11 @@ func main() {
 }
 
 func teaHandler(s ssh.Session) (tea.Model, []tea.ProgramOption) {
+	// Don't handle non-interactive sessions (SCP/SFTP have commands)
+	if len(s.Command()) > 0 {
+		return nil, nil
+	}
+	
 	pty, _, active := s.Pty()
 	if !active {
 		wish.Fatalln(s, "no active terminal")

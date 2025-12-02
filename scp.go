@@ -2,104 +2,82 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/charmbracelet/ssh"
-	"github.com/charmbracelet/wish"
+	"github.com/charmbracelet/wish/scp"
 )
 
-// Add SCP support as a custom middleware
-func scpMiddleware() wish.Middleware {
-	return func(sh ssh.Handler) ssh.Handler {
-		return func(s ssh.Session) {
-			cmd := s.Command()
-			if len(cmd) > 0 && cmd[0] == "scp" {
-				handleSCP(s, cmd)
-				return
-			}
-			sh(s)
-		}
+func newSCPHandlers() (scp.CopyToClientHandler, scp.CopyFromClientHandler) {
+	// Use FileSystemHandler as base
+	baseHandler := scp.NewFileSystemHandler(uploadDir)
+	
+	// Wrap it to add validation and user namespacing
+	uploadHandler := &validatingHandler{
+		baseHandler: baseHandler,
 	}
+	
+	// Return nil for downloads (disabled), wrapped handler for uploads
+	return nil, uploadHandler
 }
 
-func handleSCP(s ssh.Session, cmd []string) {
-	// Parse SCP command
-	target := false
-	filename := ""
+type validatingHandler struct {
+	baseHandler scp.CopyFromClientHandler
+}
+
+func (h *validatingHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, error) {
+	filename := filepath.Base(entry.Name)
+	log.Printf("SCP Write called: entry.Name=%s, filename=%s, size=%d", entry.Name, filename, entry.Size)
 	
-	for i, arg := range cmd {
-		if arg == "-t" {
-			target = true
-		} else if i == len(cmd)-1 {
-			filename = filepath.Base(arg)
-		}
+	// Skip validation for directory markers (SCP protocol negotiation)
+	if filename == "~" || filename == "." || filename == ".." {
+		log.Printf("Skipping directory marker: %s", filename)
+		return 0, nil
 	}
-
-	if !target {
-		log.Printf("SCP source mode not supported from %s", s.User())
-		fmt.Fprintf(s, "SCP source mode not supported\n")
-		s.Exit(1)
-		return
-	}
-
-	// Validate filename
-	matched, _ := filepath.Match("memory_functions_*.cpp", filename)
-	if !matched {
+	
+	// Validate filename (must be memory_functions_*.cpp)
+	if !strings.HasPrefix(filename, "memory_functions_") || !strings.HasSuffix(filename, ".cpp") {
 		log.Printf("Invalid filename from %s: %s", s.User(), filename)
-		fmt.Fprintf(s, "Only memory_functions_*.cpp files are accepted\n")
-		s.Exit(1)
-		return
+		return 0, fmt.Errorf("only memory_functions_*.cpp files are accepted")
 	}
 
-	// Create user directory
+	// Create user-specific subdirectory
 	userDir := filepath.Join(uploadDir, s.User())
 	if err := os.MkdirAll(userDir, 0755); err != nil {
 		log.Printf("Failed to create user directory: %v", err)
-		s.Exit(1)
-		return
+		return 0, err
 	}
 
-	// SCP protocol: send 0 byte to indicate ready
-	fmt.Fprintf(s, "\x00")
+	// Modify the entry to write to user's subdirectory
+	userEntry := &scp.FileEntry{
+		Name:   filepath.Join(s.User(), filename),
+		Mode:   entry.Mode,
+		Size:   entry.Size,
+		Reader: entry.Reader,
+	}
+	
+	log.Printf("Writing to: %s", filepath.Join(uploadDir, userEntry.Name))
 
-	// Read SCP header (C0644 size filename)
-	buf := make([]byte, 1024)
-	n, err := s.Read(buf)
+	n, err := h.baseHandler.Write(s, userEntry)
 	if err != nil {
-		log.Printf("Failed to read SCP header: %v", err)
-		s.Exit(1)
-		return
+		log.Printf("Write error: %v", err)
+		return n, err
 	}
 
-	// Acknowledge header
-	fmt.Fprintf(s, "\x00")
-
-	// Save file
-	dstPath := filepath.Join(userDir, filename)
-	file, err := os.Create(dstPath)
-	if err != nil {
-		log.Printf("Failed to create file: %v", err)
-		s.Exit(1)
-		return
-	}
-	defer file.Close()
-
-	// Read file content
-	_, err = io.Copy(file, io.LimitReader(s, int64(n)))
-	if err != nil && err != io.EOF {
-		log.Printf("Failed to write file: %v", err)
-		s.Exit(1)
-		return
-	}
-
-	// Final acknowledgment
-	fmt.Fprintf(s, "\x00")
-
-	log.Printf("Uploaded %s from %s", filename, s.User())
+	log.Printf("Uploaded %s from %s (%d bytes)", filename, s.User(), n)
 	addSubmission(s.User(), filename)
 	
-	s.Exit(0)
+	return n, nil
+}
+
+func (h *validatingHandler) Mkdir(s ssh.Session, entry *scp.DirEntry) error {
+	// Allow mkdir but namespace it to user directory
+	userEntry := &scp.DirEntry{
+		Name: filepath.Join(s.User(), entry.Name),
+		Mode: entry.Mode,
+	}
+	return h.baseHandler.Mkdir(s, userEntry)
 }
