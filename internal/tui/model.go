@@ -149,8 +149,8 @@ func renderSubmissions(submissions []storage.Submission) string {
 	b.WriteString(lipgloss.NewStyle().Bold(true).Render("📤 Your Submissions") + "\n\n")
 
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("240"))
-	b.WriteString(headerStyle.Render(fmt.Sprintf("%-35s %-15s %s\n",
-		"Filename", "Uploaded", "Status")))
+	b.WriteString(headerStyle.Render(fmt.Sprintf("%-35s %-15s %s",
+		"Filename", "Uploaded", "Status")) + "\n")
 
 	for _, sub := range submissions {
 		var statusColor string
@@ -169,10 +169,10 @@ func renderSubmissions(submissions []storage.Submission) string {
 
 		relTime := formatRelativeTime(sub.UploadTime)
 		
-		// Format the line without styles first for proper alignment
+		// Build the line manually to avoid formatting issues with ANSI codes
+		line := fmt.Sprintf("%-35s %-15s ", sub.Filename, relTime)
 		statusStyled := lipgloss.NewStyle().Foreground(lipgloss.Color(statusColor)).Render(sub.Status)
-		b.WriteString(fmt.Sprintf("%-35s %-15s %s\n",
-			sub.Filename, relTime, statusStyled))
+		b.WriteString(line + statusStyled + "\n")
 	}
 
 	return b.String()
@@ -208,22 +208,22 @@ func renderLeaderboard(entries []storage.LeaderboardEntry) string {
 	for i, entry := range entries {
 		rank := fmt.Sprintf("#%d", i+1)
 		
-		// Apply color only to the rank
-		var coloredRank string
+		// Apply color only to the rank and pad manually
+		var displayRank string
 		if i == 0 {
-			coloredRank = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Render(rank) // Gold
+			displayRank = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Render(rank) + "  " // Gold
 		} else if i == 1 {
-			coloredRank = lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Render(rank) // Silver
+			displayRank = lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Render(rank) + "  " // Silver
 		} else if i == 2 {
-			coloredRank = lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Render(rank) // Bronze
+			displayRank = lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Render(rank) + "  " // Bronze
 		} else {
-			coloredRank = rank
+			displayRank = fmt.Sprintf("%-4s", rank)
 		}
 		
 		// Format line with Glicko-2 rating ± RD
 		ratingStr := fmt.Sprintf("%d±%d", entry.Rating, entry.RD)
-		b.WriteString(fmt.Sprintf("%-4s %-20s %11s %8d %8d %9.2f%% %9.1f\n",
-			coloredRank, entry.Username, ratingStr, entry.Wins, entry.Losses, entry.WinPct, entry.AvgMoves))
+		b.WriteString(fmt.Sprintf("%s %-20s %11s %8d %8d %9.2f%% %9.1f\n",
+			displayRank, entry.Username, ratingStr, entry.Wins, entry.Losses, entry.WinPct, entry.AvgMoves))
 	}
 
 	return b.String()

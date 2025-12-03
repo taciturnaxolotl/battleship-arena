@@ -25,7 +25,7 @@ func GetServerURL() string {
 func SetConfig(passcode, url string) {
 	adminPasscode = passcode
 	externalURL = url
-	log.Printf("✓ Config loaded: passcode=%s..., url=%s", passcode[:10], url)
+	log.Printf("✓ Config loaded: url=%s\n", url)
 }
 
 func PublicKeyAuthHandler(ctx ssh.Context, key ssh.PublicKey) bool {
