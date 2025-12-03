@@ -581,11 +581,11 @@ const leaderboardHTML = `
         <div class="info-card">
             <h3>📤 How to Submit</h3>
             <p><strong>First time?</strong> Connect via SSH to create your account:</p>
-            <p><code>ssh -p 2222 username@localhost</code></p>
+            <p><code>ssh -p 2222 username@{{.ServerURL}}</code></p>
             <p style="margin-top: 0.5rem; color: #94a3b8;">You'll be prompted for your name, bio, and link. Your SSH key will be registered.</p>
             
             <p style="margin-top: 1rem;"><strong>Upload your AI:</strong></p>
-            <p><code>scp -P 2222 memory_functions_yourname.cpp username@localhost:~/</code></p>
+            <p><code>scp -P 2222 memory_functions_yourname.cpp username@{{.ServerURL}}:~/</code></p>
             
             <p style="margin-top: 1rem; color: #94a3b8;">
                 <a href="/users" style="color: #60a5fa;">View all players →</a>
@@ -669,11 +669,13 @@ func HandleLeaderboard(w http.ResponseWriter, r *http.Request) {
 		Matches      []storage.MatchResult
 		TotalPlayers int
 		TotalGames   int
+		ServerURL    string
 	}{
 		Entries:      entries,
 		Matches:      matches,
 		TotalPlayers: len(entries),
 		TotalGames:   calculateTotalGames(entries),
+		ServerURL:    GetServerURL(),
 	}
 
 	if err := tmpl.Execute(w, data); err != nil {

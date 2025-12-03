@@ -18,6 +18,10 @@ var (
 	externalURL   string
 )
 
+func GetServerURL() string {
+	return externalURL
+}
+
 func SetConfig(passcode, url string) {
 	adminPasscode = passcode
 	externalURL = url
