@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"strings"
 	
@@ -39,17 +40,30 @@ func HandleUserProfile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	
+	// Get user's submissions with stats
+	submissions, err := storage.GetUserSubmissionsWithStats(username)
+	if err != nil {
+		log.Printf("Error getting submissions for %s: %v", username, err)
+		submissions = []storage.SubmissionWithStats{}
+	}
+	if submissions == nil {
+		submissions = []storage.SubmissionWithStats{}
+	}
+	log.Printf("Found %d submissions for %s", len(submissions), username)
+	
 	// Parse public key for display
 	publicKeyDisplay := formatPublicKey(user.PublicKey)
 	
 	tmpl := template.Must(template.New("user").Parse(userProfileHTML))
 	data := struct {
-		User            *storage.User
-		Entry           *storage.LeaderboardEntry
+		User             *storage.User
+		Entry            *storage.LeaderboardEntry
+		Submissions      []storage.SubmissionWithStats
 		PublicKeyDisplay string
 	}{
 		User:             user,
 		Entry:            userEntry,
+		Submissions:      submissions,
 		PublicKeyDisplay: publicKeyDisplay,
 	}
 	tmpl.Execute(w, data)
@@ -251,6 +265,59 @@ const userProfileHTML = `
             <div class="stat-card">
                 <div class="stat-label">Win Rate</div>
                 <div class="stat-value">{{printf "%.1f" .Entry.WinPct}}%</div>
+            </div>
+        </div>
+        {{end}}
+        
+        {{if .Submissions}}
+        <div class="key-section" style="margin-bottom: 2rem;">
+            <h2 class="section-title">📤 Submissions</h2>
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.875rem;">
+                    <thead>
+                        <tr style="border-bottom: 1px solid #334155;">
+                            <th style="text-align: left; padding: 0.75rem 0.5rem; color: #94a3b8;">Filename</th>
+                            <th style="text-align: left; padding: 0.75rem 0.5rem; color: #94a3b8;">Uploaded</th>
+                            <th style="text-align: center; padding: 0.75rem 0.5rem; color: #94a3b8;">Rating</th>
+                            <th style="text-align: center; padding: 0.75rem 0.5rem; color: #94a3b8;">Wins</th>
+                            <th style="text-align: center; padding: 0.75rem 0.5rem; color: #94a3b8;">Losses</th>
+                            <th style="text-align: center; padding: 0.75rem 0.5rem; color: #94a3b8;">Win Rate</th>
+                            <th style="text-align: center; padding: 0.75rem 0.5rem; color: #94a3b8;">Avg Moves</th>
+                            <th style="text-align: center; padding: 0.75rem 0.5rem; color: #94a3b8;">Status</th>
+                            <th style="text-align: center; padding: 0.75rem 0.5rem; color: #94a3b8;">Active</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .Submissions}}
+                        <tr style="border-bottom: 1px solid #334155;">
+                            <td style="padding: 0.75rem 0.5rem; font-family: Monaco, monospace;">{{.Filename}}</td>
+                            <td style="padding: 0.75rem 0.5rem; color: #94a3b8;">{{.UploadTime.Format "Jan 2, 3:04 PM"}}</td>
+                            <td style="padding: 0.75rem 0.5rem; text-align: center;">
+                                {{if .HasMatches}}{{.Rating}} <span style="color: #94a3b8; font-size: 0.8em;">±{{.RD}}</span>{{else}}-{{end}}
+                            </td>
+                            <td style="padding: 0.75rem 0.5rem; text-align: center;">{{if .HasMatches}}{{.Wins}}{{else}}-{{end}}</td>
+                            <td style="padding: 0.75rem 0.5rem; text-align: center;">{{if .HasMatches}}{{.Losses}}{{else}}-{{end}}</td>
+                            <td style="padding: 0.75rem 0.5rem; text-align: center;">
+                                {{if .HasMatches}}
+                                    {{if ge .WinPct 60.0}}<span style="color: #10b981;">{{printf "%.1f" .WinPct}}%</span>{{end}}
+                                    {{if and (lt .WinPct 60.0) (ge .WinPct 40.0)}}<span style="color: #f59e0b;">{{printf "%.1f" .WinPct}}%</span>{{end}}
+                                    {{if lt .WinPct 40.0}}<span style="color: #ef4444;">{{printf "%.1f" .WinPct}}%</span>{{end}}
+                                {{else}}-{{end}}
+                            </td>
+                            <td style="padding: 0.75rem 0.5rem; text-align: center;">{{if .HasMatches}}{{printf "%.1f" .AvgMoves}}{{else}}-{{end}}</td>
+                            <td style="padding: 0.75rem 0.5rem; text-align: center;">
+                                {{if eq .Status "completed"}}<span style="color: #10b981;">✓</span>{{end}}
+                                {{if eq .Status "pending"}}<span style="color: #fbbf24;">⏳</span>{{end}}
+                                {{if eq .Status "testing"}}<span style="color: #3b82f6;">⚙️</span>{{end}}
+                                {{if eq .Status "failed"}}<span style="color: #ef4444;">✗</span>{{end}}
+                            </td>
+                            <td style="padding: 0.75rem 0.5rem; text-align: center;">
+                                {{if .IsActive}}<span style="color: #10b981;">●</span>{{else}}<span style="color: #64748b;">○</span>{{end}}
+                            </td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
             </div>
         </div>
         {{end}}

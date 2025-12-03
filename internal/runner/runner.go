@@ -35,6 +35,9 @@ func CompileSubmission(sub storage.Submission, uploadDir string) error {
 
 	buildDir := filepath.Join(enginePath, "build")
 	os.MkdirAll(buildDir, 0755)
+	
+	srcDir := filepath.Join(enginePath, "src")
+	os.MkdirAll(srcDir, 0755)
 
 	srcPath := filepath.Join(uploadDir, sub.Username, sub.Filename)
 	dstPath := filepath.Join(enginePath, "src", sub.Filename)

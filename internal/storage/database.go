@@ -29,6 +29,19 @@ type Submission struct {
 	Filename   string
 	UploadTime time.Time
 	Status     string
+	IsActive   bool
+}
+
+type SubmissionWithStats struct {
+	Submission
+	Rating     int
+	RD         int
+	Wins       int
+	Losses     int
+	WinPct     float64
+	AvgMoves   float64
+	LastPlayed time.Time
+	HasMatches bool
 }
 
 type Tournament struct {
@@ -338,7 +351,7 @@ func GetActiveSubmissions() ([]Submission, error) {
 
 func GetUserSubmissions(username string) ([]Submission, error) {
 	rows, err := DB.Query(
-		"SELECT id, username, filename, upload_time, status FROM submissions WHERE username = ? ORDER BY upload_time DESC LIMIT 10",
+		"SELECT id, username, filename, upload_time, status, is_active FROM submissions WHERE username = ? ORDER BY upload_time DESC LIMIT 10",
 		username,
 	)
 	if err != nil {
@@ -349,10 +362,74 @@ func GetUserSubmissions(username string) ([]Submission, error) {
 	var submissions []Submission
 	for rows.Next() {
 		var s Submission
-		err := rows.Scan(&s.ID, &s.Username, &s.Filename, &s.UploadTime, &s.Status)
+		err := rows.Scan(&s.ID, &s.Username, &s.Filename, &s.UploadTime, &s.Status, &s.IsActive)
 		if err != nil {
 			return nil, err
 		}
+		submissions = append(submissions, s)
+	}
+
+	return submissions, rows.Err()
+}
+
+func GetUserSubmissionsWithStats(username string) ([]SubmissionWithStats, error) {
+	query := `
+	SELECT 
+		s.id,
+		s.username,
+		s.filename,
+		s.upload_time,
+		s.status,
+		s.is_active,
+		COALESCE(s.glicko_rating, 1500.0) as rating,
+		COALESCE(s.glicko_rd, 350.0) as rd,
+		COALESCE(SUM(CASE WHEN m.player1_id = s.id THEN m.player1_wins WHEN m.player2_id = s.id THEN m.player2_wins ELSE 0 END), 0) as total_wins,
+		COALESCE(SUM(CASE WHEN m.player1_id = s.id THEN m.player2_wins WHEN m.player2_id = s.id THEN m.player1_wins ELSE 0 END), 0) as total_losses,
+		COALESCE(AVG(CASE WHEN m.player1_id = s.id THEN m.player1_moves ELSE m.player2_moves END), 0) as avg_moves,
+		MAX(m.timestamp) as last_played,
+		COUNT(m.id) as match_count
+	FROM submissions s
+	LEFT JOIN matches m ON (m.player1_id = s.id OR m.player2_id = s.id) AND m.is_valid = 1
+	WHERE s.username = ?
+	GROUP BY s.id, s.username, s.filename, s.upload_time, s.status, s.is_active, s.glicko_rating, s.glicko_rd
+	ORDER BY s.upload_time DESC
+	LIMIT 10
+	`
+	
+	rows, err := DB.Query(query, username)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var submissions []SubmissionWithStats
+	for rows.Next() {
+		var s SubmissionWithStats
+		var lastPlayed *string
+		var rating, rd float64
+		var matchCount int
+		
+		err := rows.Scan(
+			&s.ID, &s.Username, &s.Filename, &s.UploadTime, &s.Status, &s.IsActive,
+			&rating, &rd, &s.Wins, &s.Losses, &s.AvgMoves, &lastPlayed, &matchCount,
+		)
+		if err != nil {
+			return nil, err
+		}
+		
+		s.Rating = int(rating)
+		s.RD = int(rd)
+		s.HasMatches = matchCount > 0
+		
+		totalGames := s.Wins + s.Losses
+		if totalGames > 0 {
+			s.WinPct = float64(s.Wins) / float64(totalGames) * 100.0
+		}
+		
+		if lastPlayed != nil {
+			s.LastPlayed, _ = time.Parse("2006-01-02 15:04:05", *lastPlayed)
+		}
+		
 		submissions = append(submissions, s)
 	}
 
