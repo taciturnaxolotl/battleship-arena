@@ -19,7 +19,11 @@ var (
 )
 
 func GetServerURL() string {
-	return externalURL
+	// Strip protocol (http://, https://) from URL for SSH commands
+	url := externalURL
+	url = strings.TrimPrefix(url, "https://")
+	url = strings.TrimPrefix(url, "http://")
+	return url
 }
 
 func SetConfig(passcode, url string) {
