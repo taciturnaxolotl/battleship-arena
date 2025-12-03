@@ -119,6 +119,18 @@ func initDB(path string) (*sql.DB, error) {
 		FOREIGN KEY (winner_id) REFERENCES submissions(id)
 	);
 
+	CREATE TABLE IF NOT EXISTS rating_history (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		submission_id INTEGER NOT NULL,
+		rating REAL NOT NULL,
+		rd REAL NOT NULL,
+		volatility REAL NOT NULL,
+		match_id INTEGER,
+		timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (submission_id) REFERENCES submissions(id),
+		FOREIGN KEY (match_id) REFERENCES matches(id)
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_bracket_matches_tournament ON bracket_matches(tournament_id);
 	CREATE INDEX IF NOT EXISTS idx_bracket_matches_status ON bracket_matches(status);
 	CREATE INDEX IF NOT EXISTS idx_tournaments_status ON tournaments(status);
@@ -129,6 +141,7 @@ func initDB(path string) (*sql.DB, error) {
 	CREATE INDEX IF NOT EXISTS idx_submissions_status ON submissions(status);
 	CREATE INDEX IF NOT EXISTS idx_submissions_active ON submissions(is_active);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_unique_pair ON matches(player1_id, player2_id, is_valid) WHERE is_valid = 1;
+	CREATE INDEX IF NOT EXISTS idx_rating_history_submission ON rating_history(submission_id, timestamp);
 	`
 
 	_, err = db.Exec(schema)
@@ -220,12 +233,15 @@ func addSubmission(username, filename string) (int64, error) {
 	return result.LastInsertId()
 }
 
-func addMatch(player1ID, player2ID, winnerID, player1Wins, player2Wins, player1Moves, player2Moves int) error {
-	_, err := globalDB.Exec(
+func addMatch(player1ID, player2ID, winnerID, player1Wins, player2Wins, player1Moves, player2Moves int) (int64, error) {
+	result, err := globalDB.Exec(
 		"INSERT INTO matches (player1_id, player2_id, winner_id, player1_wins, player2_wins, player1_moves, player2_moves) VALUES (?, ?, ?, ?, ?, ?, ?)",
 		player1ID, player2ID, winnerID, player1Wins, player2Wins, player1Moves, player2Moves,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
 }
 
 func updateSubmissionStatus(id int, status string) error {
@@ -486,6 +502,54 @@ func updateGlicko2Ratings(player1ID, player2ID, player1Wins, player2Wins int) er
 		p2New.Rating, p2New.RD, p2New.Volatility, player2ID,
 	)
 	return err
+}
+
+func recordRatingHistory(submissionID int, matchID int, rating, rd, volatility float64) error {
+	_, err := globalDB.Exec(
+		"INSERT INTO rating_history (submission_id, match_id, rating, rd, volatility) VALUES (?, ?, ?, ?, ?)",
+		submissionID, matchID, rating, rd, volatility,
+	)
+	return err
+}
+
+type RatingHistoryPoint struct {
+	Rating     int
+	RD         int
+	Volatility float64
+	Timestamp  time.Time
+	MatchID    int
+}
+
+func getRatingHistory(submissionID int) ([]RatingHistoryPoint, error) {
+	rows, err := globalDB.Query(`
+		SELECT rating, rd, volatility, timestamp, match_id 
+		FROM rating_history 
+		WHERE submission_id = ? 
+		ORDER BY timestamp ASC
+	`, submissionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	
+	var history []RatingHistoryPoint
+	for rows.Next() {
+		var h RatingHistoryPoint
+		var rating, rd float64
+		var matchID sql.NullInt64
+		err := rows.Scan(&rating, &rd, &h.Volatility, &h.Timestamp, &matchID)
+		if err != nil {
+			return nil, err
+		}
+		h.Rating = int(rating)
+		h.RD = int(rd)
+		if matchID.Valid {
+			h.MatchID = int(matchID.Int64)
+		}
+		history = append(history, h)
+	}
+	
+	return history, rows.Err()
 }
 
 func hasMatchBetween(player1ID, player2ID int) (bool, error) {

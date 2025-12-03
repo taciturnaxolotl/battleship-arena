@@ -119,6 +119,8 @@ func startWebServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleLeaderboard)
 	mux.HandleFunc("/api/leaderboard", handleAPILeaderboard)
+	mux.HandleFunc("/api/rating-history/", handleRatingHistory)
+	mux.HandleFunc("/player/", handlePlayerPage)
 	
 	// Serve static files
 	fs := http.FileServer(http.Dir("./static"))

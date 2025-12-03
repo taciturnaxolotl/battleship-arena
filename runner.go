@@ -13,6 +13,18 @@ import (
 
 const enginePath = "./battleship-engine"
 
+func recordRatingSnapshot(submissionID, matchID int) {
+	var rating, rd, volatility float64
+	err := globalDB.QueryRow(
+		"SELECT glicko_rating, glicko_rd, glicko_volatility FROM submissions WHERE id = ?",
+		submissionID,
+	).Scan(&rating, &rd, &volatility)
+	
+	if err == nil {
+		recordRatingHistory(submissionID, matchID, rating, rd, volatility)
+	}
+}
+
 func processSubmissions() error {
 	submissions, err := getPendingSubmissions()
 	if err != nil {
@@ -204,12 +216,17 @@ func runRoundRobinMatches(newSub Submission) {
 		}
 		
 		// Store match result
-		if err := addMatch(newSub.ID, opponent.ID, winnerID, player1Wins, player2Wins, avgMoves, avgMoves); err != nil {
+		matchID, err := addMatch(newSub.ID, opponent.ID, winnerID, player1Wins, player2Wins, avgMoves, avgMoves)
+		if err != nil {
 			log.Printf("Failed to store match result: %v", err)
 		} else {
 			// Update Glicko-2 ratings based on actual win percentages
 			if err := updateGlicko2Ratings(newSub.ID, opponent.ID, player1Wins, player2Wins); err != nil {
 				log.Printf("Glicko-2 update failed: %v", err)
+			} else {
+				// Record rating history for both players after update
+				recordRatingSnapshot(newSub.ID, int(matchID))
+				recordRatingSnapshot(opponent.ID, int(matchID))
 			}
 			
 			NotifyLeaderboardUpdate()

@@ -190,6 +190,11 @@ const leaderboardHTML = `
             color: #e2e8f0;
         }
         
+        .player-name a:hover {
+            color: #60a5fa !important;
+            text-decoration: underline !important;
+        }
+        
         .win-rate {
             font-weight: 600;
             padding: 0.25rem 0.75rem;
@@ -312,7 +317,7 @@ const leaderboardHTML = `
                 
                 return '<tr>' +
                     '<td class="rank rank-' + rank + '">' + medal + '</td>' +
-                    '<td class="player-name">' + e.Username + '</td>' +
+                    '<td class="player-name"><a href="/player/' + e.Username + '" style="color: inherit; text-decoration: none;">' + e.Username + '</a></td>' +
                     '<td><strong>' + e.Rating + '</strong> <span style="color: #94a3b8; font-size: 0.85em;">±' + e.RD + '</span></td>' +
                     '<td>' + e.Wins.toLocaleString() + '</td>' +
                     '<td>' + e.Losses.toLocaleString() + '</td>' +
@@ -379,7 +384,7 @@ const leaderboardHTML = `
                     {{range $i, $e := .Entries}}
                     <tr>
                         <td class="rank rank-{{add $i 1}}">{{if lt $i 3}}{{medal $i}}{{else}}{{add $i 1}}{{end}}</td>
-                        <td class="player-name">{{$e.Username}}</td>
+                        <td class="player-name"><a href="/player/{{$e.Username}}" style="color: inherit; text-decoration: none;">{{$e.Username}}</a></td>
                         <td><strong>{{$e.Rating}}</strong> <span style="color: #94a3b8; font-size: 0.85em;">±{{$e.RD}}</span></td>
                         <td>{{$e.Wins}}</td>
                         <td>{{$e.Losses}}</td>
@@ -501,3 +506,302 @@ func calculateTotalGames(entries []LeaderboardEntry) int {
 	}
 	return total / 2 // Each game counted twice (win+loss)
 }
+
+func handleRatingHistory(w http.ResponseWriter, r *http.Request) {
+	// Extract username from URL path /api/rating-history/{username}
+	username := r.URL.Path[len("/api/rating-history/"):]
+	if username == "" {
+		http.Error(w, "Username required", http.StatusBadRequest)
+		return
+	}
+	
+	// Get submission ID for this username
+	var submissionID int
+	err := globalDB.QueryRow(
+		"SELECT id FROM submissions WHERE username = ? AND is_active = 1",
+		username,
+	).Scan(&submissionID)
+	
+	if err != nil {
+		http.Error(w, "Player not found", http.StatusNotFound)
+		return
+	}
+	
+	// Get rating history
+	history, err := getRatingHistory(submissionID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get rating history: %v", err), http.StatusInternalServerError)
+		return
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(history)
+}
+
+func handlePlayerPage(w http.ResponseWriter, r *http.Request) {
+	username := r.URL.Path[len("/player/"):]
+	if username == "" {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	
+	tmpl := template.Must(template.New("player").Parse(playerPageHTML))
+	tmpl.Execute(w, map[string]string{"Username": username})
+}
+
+const playerPageHTML = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>{{.Username}} - Battleship Arena</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            min-height: 100vh;
+            padding: 2rem 1rem;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .back-link {
+            display: inline-block;
+            margin-bottom: 2rem;
+            color: #60a5fa;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .stat-card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 1.5rem;
+        }
+        
+        .stat-label {
+            font-size: 0.875rem;
+            color: #94a3b8;
+            margin-bottom: 0.5rem;
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #60a5fa;
+        }
+        
+        .chart-container {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+        
+        .chart-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            color: #e2e8f0;
+        }
+        
+        canvas {
+            max-height: 400px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="back-link">← Back to Leaderboard</a>
+        <h1>{{.Username}}</h1>
+        <p style="color: #94a3b8; margin-bottom: 2rem;">Player Statistics</p>
+        
+        <div class="stats-grid" id="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Current Rating</div>
+                <div class="stat-value" id="current-rating">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Rating Deviation</div>
+                <div class="stat-value" id="current-rd">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Win Rate</div>
+                <div class="stat-value" id="win-rate">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Total Matches</div>
+                <div class="stat-value" id="total-matches">-</div>
+            </div>
+        </div>
+        
+        <div class="chart-container">
+            <h2 class="chart-title">Rating History</h2>
+            <canvas id="rating-chart"></canvas>
+        </div>
+        
+        <div class="chart-container">
+            <h2 class="chart-title">Rating Deviation Over Time</h2>
+            <canvas id="rd-chart"></canvas>
+        </div>
+    </div>
+    
+    <script>
+        const username = "{{.Username}}";
+        
+        async function loadData() {
+            try {
+                // Load rating history
+                const historyRes = await fetch('/api/rating-history/' + username);
+                const history = await historyRes.json();
+                
+                // Load current stats from leaderboard
+                const leaderboardRes = await fetch('/api/leaderboard');
+                const leaderboard = await leaderboardRes.json();
+                const player = leaderboard.find(p => p.Username === username);
+                
+                if (player) {
+                    document.getElementById('current-rating').textContent = player.Rating + ' ±' + player.RD;
+                    document.getElementById('current-rd').textContent = player.RD;
+                    document.getElementById('win-rate').textContent = player.WinPct.toFixed(1) + '%';
+                    const total = player.Wins + player.Losses;
+                    document.getElementById('total-matches').textContent = Math.floor(total / 1000);
+                }
+                
+                // Create rating chart
+                const ratingCtx = document.getElementById('rating-chart').getContext('2d');
+                new Chart(ratingCtx, {
+                    type: 'line',
+                    data: {
+                        labels: history.map((h, i) => 'Match ' + (i + 1)),
+                        datasets: [{
+                            label: 'Rating',
+                            data: history.map(h => h.Rating),
+                            borderColor: '#60a5fa',
+                            backgroundColor: 'rgba(96, 165, 250, 0.1)',
+                            tension: 0.1,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        plugins: {
+                            legend: {
+                                display: false
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: false,
+                                grid: {
+                                    color: '#334155'
+                                },
+                                ticks: {
+                                    color: '#94a3b8'
+                                }
+                            },
+                            x: {
+                                grid: {
+                                    color: '#334155'
+                                },
+                                ticks: {
+                                    color: '#94a3b8',
+                                    maxTicksLimit: 10
+                                }
+                            }
+                        }
+                    }
+                });
+                
+                // Create RD chart
+                const rdCtx = document.getElementById('rd-chart').getContext('2d');
+                new Chart(rdCtx, {
+                    type: 'line',
+                    data: {
+                        labels: history.map((h, i) => 'Match ' + (i + 1)),
+                        datasets: [{
+                            label: 'Rating Deviation',
+                            data: history.map(h => h.RD),
+                            borderColor: '#a78bfa',
+                            backgroundColor: 'rgba(167, 139, 250, 0.1)',
+                            tension: 0.1,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        plugins: {
+                            legend: {
+                                display: false
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: false,
+                                grid: {
+                                    color: '#334155'
+                                },
+                                ticks: {
+                                    color: '#94a3b8'
+                                }
+                            },
+                            x: {
+                                grid: {
+                                    color: '#334155'
+                                },
+                                ticks: {
+                                    color: '#94a3b8',
+                                    maxTicksLimit: 10
+                                }
+                            }
+                        }
+                    }
+                });
+                
+            } catch (err) {
+                console.error('Failed to load data:', err);
+            }
+        }
+        
+        loadData();
+    </script>
+</body>
+</html>
+`
+
