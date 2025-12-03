@@ -114,6 +114,10 @@ func startWebServer() {
 	mux.HandleFunc("/api/leaderboard", handleAPILeaderboard)
 	mux.HandleFunc("/api/bracket", handleBracketData)
 	
+	// Serve static files
+	fs := http.FileServer(http.Dir("./static"))
+	mux.Handle("/static/", http.StripPrefix("/static/", fs))
+	
 	log.Printf("Web server starting on :%s", webPort)
 	if err := http.ListenAndServe(":"+webPort, mux); err != nil {
 		log.Fatal(err)

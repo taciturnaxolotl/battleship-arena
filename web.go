@@ -14,7 +14,7 @@ const leaderboardHTML = `
     <title>Battleship Arena - Leaderboard</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/brackets-viewer@latest/dist/brackets-viewer.min.css" />
+    <link rel="stylesheet" href="/static/brackets-viewer.min.css" />
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
@@ -74,6 +74,29 @@ const leaderboardHTML = `
         .win-rate-high { color: #10b981; }
         .win-rate-med { color: #f59e0b; }
         .win-rate-low { color: #ef4444; }
+        .stage {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+        .stage-Expert {
+            background: #10b981;
+            color: white;
+        }
+        .stage-Advanced {
+            background: #3b82f6;
+            color: white;
+        }
+        .stage-Intermediate {
+            background: #f59e0b;
+            color: white;
+        }
+        .stage-Beginner {
+            background: #6b7280;
+            color: white;
+        }
         .stats {
             display: flex;
             justify-content: space-around;
@@ -127,7 +150,7 @@ const leaderboardHTML = `
             margin-bottom: 30px;
         }
     </style>
-    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/brackets-viewer@latest/dist/brackets-viewer.min.js"></script>
+    <script type="text/javascript" src="/static/brackets-viewer.min.js"></script>
     <script>
         // Auto-refresh every 30 seconds
         setTimeout(() => location.reload(), 30000);
@@ -168,6 +191,7 @@ const leaderboardHTML = `
                 <tr>
                     <th>Rank</th>
                     <th>Player</th>
+                    <th>Stage</th>
                     <th>Wins</th>
                     <th>Losses</th>
                     <th>Win Rate</th>
@@ -181,6 +205,7 @@ const leaderboardHTML = `
                 <tr>
                     <td class="rank rank-{{add $i 1}}">{{if lt $i 3}}{{medal $i}}{{else}}#{{add $i 1}}{{end}}</td>
                     <td><strong>{{$e.Username}}</strong></td>
+                    <td><span class="stage stage-{{$e.Stage}}">{{$e.Stage}}</span></td>
                     <td>{{$e.Wins}}</td>
                     <td>{{$e.Losses}}</td>
                     <td class="win-rate {{winRateClass $e}}">{{winRate $e}}%</td>
@@ -190,7 +215,7 @@ const leaderboardHTML = `
                 {{end}}
                 {{else}}
                 <tr>
-                    <td colspan="7" style="text-align: center; padding: 40px; color: #999;">
+                    <td colspan="8" style="text-align: center; padding: 40px; color: #999;">
                         No submissions yet. Be the first to compete!
                     </td>
                 </tr>
@@ -312,82 +337,164 @@ func handleAPILeaderboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleBracketData(w http.ResponseWriter, r *http.Request) {
-	matches, err := getAllMatches()
+	// Get latest tournament (active or completed)
+	tournament, err := getLatestTournament()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load tournament: %v", err), http.StatusInternalServerError)
+		return
+	}
+	
+	if tournament == nil {
+		// No tournament yet
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"stages":       []map[string]interface{}{},
+			"matches":      []map[string]interface{}{},
+			"participants": []map[string]interface{}{},
+		})
+		return
+	}
+	
+	// Get all bracket matches
+	matches, err := getAllBracketMatches(tournament.ID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load matches: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	if matches == nil {
-		matches = []MatchResult{}
+		matches = []BracketMatch{}
 	}
 
-	// Get unique participants
-	participantMap := make(map[string]int)
+	// Get unique participants (skip byes where ID = 0)
+	participantMap := make(map[int]int) // submissionID -> participantID
 	participants := []map[string]interface{}{}
 	participantID := 1
 
 	for _, match := range matches {
-		if _, exists := participantMap[match.Player1Username]; !exists {
-			participantMap[match.Player1Username] = participantID
-			participants = append(participants, map[string]interface{}{
-				"id":   participantID,
-				"name": match.Player1Username,
-			})
-			participantID++
+		if match.Player1ID > 0 && match.Player1Name != "" {
+			if _, exists := participantMap[match.Player1ID]; !exists {
+				participantMap[match.Player1ID] = participantID
+				participants = append(participants, map[string]interface{}{
+					"id":   participantID,
+					"name": match.Player1Name,
+				})
+				participantID++
+			}
 		}
-		if _, exists := participantMap[match.Player2Username]; !exists {
-			participantMap[match.Player2Username] = participantID
-			participants = append(participants, map[string]interface{}{
-				"id":   participantID,
-				"name": match.Player2Username,
-			})
-			participantID++
+		if match.Player2ID > 0 && match.Player2Name != "" {
+			if _, exists := participantMap[match.Player2ID]; !exists {
+				participantMap[match.Player2ID] = participantID
+				participants = append(participants, map[string]interface{}{
+					"id":   participantID,
+					"name": match.Player2Name,
+				})
+				participantID++
+			}
 		}
 	}
 
-	// Create match data in brackets-viewer format
+	// Group matches by round for bracket format
+	roundMatches := make(map[int][]BracketMatch)
+	maxRound := 0
+	for _, match := range matches {
+		roundMatches[match.Round] = append(roundMatches[match.Round], match)
+		if match.Round > maxRound {
+			maxRound = match.Round
+		}
+	}
+
+	// Create match data in brackets-viewer format (single elimination)
 	bracketMatches := []map[string]interface{}{}
-	for i, match := range matches {
-		opponent1 := map[string]interface{}{
-			"id":     participantMap[match.Player1Username],
-			"result": "loss",
-		}
-		opponent2 := map[string]interface{}{
-			"id":     participantMap[match.Player2Username],
-			"result": "loss",
-		}
+	matchNumber := 1
+	
+	for round := 1; round <= maxRound; round++ {
+		for _, match := range roundMatches[round] {
+			var opponent1, opponent2 map[string]interface{}
+			
+			// Player 1
+			if match.Player1ID > 0 {
+				result := "loss"
+				if match.WinnerID == match.Player1ID {
+					result = "win"
+				}
+				opponent1 = map[string]interface{}{
+					"id":     participantMap[match.Player1ID],
+					"result": result,
+					"score":  match.Player1Wins,
+				}
+			} else {
+				opponent1 = nil // Bye
+			}
+			
+			// Player 2
+			if match.Player2ID > 0 {
+				result := "loss"
+				if match.WinnerID == match.Player2ID {
+					result = "win"
+				}
+				opponent2 = map[string]interface{}{
+					"id":     participantMap[match.Player2ID],
+					"result": result,
+					"score":  match.Player2Wins,
+				}
+			} else {
+				opponent2 = nil // Bye
+			}
 
-		if match.WinnerUsername == match.Player1Username {
-			opponent1["result"] = "win"
-		} else {
-			opponent2["result"] = "win"
-		}
+			status := "pending"
+			if match.Status == "completed" {
+				status = "completed"
+			}
 
-		bracketMatches = append(bracketMatches, map[string]interface{}{
-			"id":         i + 1,
-			"stage_id":   1,
-			"group_id":   1,
-			"round_id":   1,
-			"number":     i + 1,
-			"opponent1":  opponent1,
-			"opponent2":  opponent2,
-			"status":     "completed",
-		})
+			bracketMatches = append(bracketMatches, map[string]interface{}{
+				"id":         matchNumber,
+				"stage_id":   1,
+				"group_id":   1,
+				"round_id":   round,
+				"number":     match.Position + 1,
+				"opponent1":  opponent1,
+				"opponent2":  opponent2,
+				"status":     status,
+			})
+			matchNumber++
+		}
 	}
 
-	// Create stage data
+	// Create stage data for single elimination
+	// Calculate bracket size (next power of 2)
+	bracketSize := 1
+	for bracketSize < len(participants) {
+		bracketSize *= 2
+	}
+	
 	stages := []map[string]interface{}{
 		{
 			"id":     1,
-			"name":   "Round Robin",
-			"type":   "round_robin",
+			"name":   "Tournament",
+			"type":   "single_elimination",
 			"number": 1,
+			"settings": map[string]interface{}{
+				"size":           bracketSize,
+				"seedOrdering":   []string{"natural"},
+				"grandFinal":     "none",
+				"skipFirstRound": false,
+			},
+		},
+	}
+	
+	// Create groups array (required for brackets-viewer)
+	groups := []map[string]interface{}{
+		{
+			"id":       1,
+			"stage_id": 1,
+			"number":   1,
 		},
 	}
 
 	data := map[string]interface{}{
 		"stages":       stages,
+		"groups":       groups,
 		"matches":      bracketMatches,
 		"matchGames":   []map[string]interface{}{},
 		"participants": participants,

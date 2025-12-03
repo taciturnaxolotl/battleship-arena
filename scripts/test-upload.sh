@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Test script to upload three different AI submissions
+# Test script to upload all AI submissions
 
 HOST="0.0.0.0"
 PORT="2222"
@@ -10,57 +10,42 @@ echo "🚢 Battleship Arena - Test Submission Script"
 echo "=============================================="
 echo ""
 
-# Copy klukas submission to test-submissions if it doesn't exist
-if [ ! -f "$SCRIPT_DIR/test-submissions/memory_functions_klukas.cpp" ]; then
-    echo "Copying klukas submission..."
-    mkdir -p "$SCRIPT_DIR/test-submissions"
-    cp /Users/kierank/code/school/cs1210-battleship/src/memory_functions_klukas.cpp "$SCRIPT_DIR/test-submissions/"
-fi
+# Define all submissions: username, filename
+declare -a SUBMISSIONS=(
+    "alice:memory_functions_random.cpp"
+    "bob:memory_functions_hunter.cpp"
+    "charlie:memory_functions_klukas.cpp"
+    "dave:memory_functions_diagonal.cpp"
+    "eve:memory_functions_edge.cpp"
+    "frank:memory_functions_spiral.cpp"
+    "grace:memory_functions_parity.cpp"
+    "henry:memory_functions_probability.cpp"
+    "iris:memory_functions_cluster.cpp"
+    "jack:memory_functions_snake.cpp"
+)
 
-# Upload for alice (random AI)
-echo "📤 Uploading for user: alice"
-echo "   File: test-submissions/memory_functions_random.cpp"
-if [ -f "$SCRIPT_DIR/test-submissions/memory_functions_random.cpp" ]; then
-    scp -P $PORT "$SCRIPT_DIR/test-submissions/memory_functions_random.cpp" "alice@$HOST:~/memory_functions_random.cpp"
-    if [ $? -eq 0 ]; then
-        echo "✅ Upload successful for alice"
+# Upload each submission
+for submission in "${SUBMISSIONS[@]}"; do
+    IFS=':' read -r username filename <<< "$submission"
+    
+    echo "📤 Uploading for user: $username"
+    echo "   File: test-submissions/$filename"
+    
+    if [ -f "$SCRIPT_DIR/test-submissions/$filename" ]; then
+        # Capture SCP output to check for 100% completion
+        scp_output=$(scp -P $PORT "$SCRIPT_DIR/test-submissions/$filename" "$username@$HOST:~/$filename" 2>&1)
+        echo "$scp_output" | grep -q "100%"
+        if [ $? -eq 0 ]; then
+            echo "✅ Upload successful for $username"
+        else
+            echo "❌ Upload failed for $username"
+            echo "$scp_output"
+        fi
     else
-        echo "❌ Upload failed for alice"
+        echo "❌ Error: File not found"
     fi
-else
-    echo "❌ Error: File not found"
-fi
-echo ""
-
-# Upload for bob (hunter AI)
-echo "📤 Uploading for user: bob"
-echo "   File: test-submissions/memory_functions_hunter.cpp"
-if [ -f "$SCRIPT_DIR/test-submissions/memory_functions_hunter.cpp" ]; then
-    scp -P $PORT "$SCRIPT_DIR/test-submissions/memory_functions_hunter.cpp" "bob@$HOST:~/memory_functions_hunter.cpp"
-    if [ $? -eq 0 ]; then
-        echo "✅ Upload successful for bob"
-    else
-        echo "❌ Upload failed for bob"
-    fi
-else
-    echo "❌ Error: File not found"
-fi
-echo ""
-
-# Upload for charlie (klukas AI)
-echo "📤 Uploading for user: charlie"
-echo "   File: test-submissions/memory_functions_klukas.cpp"
-if [ -f "$SCRIPT_DIR/test-submissions/memory_functions_klukas.cpp" ]; then
-    scp -P $PORT "$SCRIPT_DIR/test-submissions/memory_functions_klukas.cpp" "charlie@$HOST:~/memory_functions_klukas.cpp"
-    if [ $? -eq 0 ]; then
-        echo "✅ Upload successful for charlie"
-    else
-        echo "❌ Upload failed for charlie"
-    fi
-else
-    echo "❌ Error: File not found"
-fi
-echo ""
+    echo ""
+done
 
 echo "=============================================="
 echo "✨ All submissions uploaded!"
