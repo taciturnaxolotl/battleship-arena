@@ -20,19 +20,18 @@ func processSubmissions() error {
 	}
 
 	for _, sub := range submissions {
-		log.Printf("Starting compilation for submission %d: %s by %s", sub.ID, sub.Filename, sub.Username)
+		log.Printf("⚙️  Compiling %s (%s)", sub.Username, sub.Filename)
 		
 		if err := compileSubmission(sub); err != nil {
-			log.Printf("Submission %d failed compilation: %v", sub.ID, err)
+			log.Printf("❌ Compilation failed for %s: %v", sub.Username, err)
 			updateSubmissionStatus(sub.ID, "failed")
 			continue
 		}
 		
-		log.Printf("Submission %d compiled successfully: %s by %s", sub.ID, sub.Filename, sub.Username)
+		log.Printf("✓ Compiled %s", sub.Username)
 		updateSubmissionStatus(sub.ID, "completed")
 		
 		// Run round-robin matches
-		log.Printf("Starting round-robin matches for submission %d", sub.ID)
 		runRoundRobinMatches(sub)
 	}
 
@@ -173,13 +172,12 @@ func runRoundRobinMatches(newSub Submission) {
 		return
 	}
 
-	log.Printf("Starting round-robin for %s against %d new opponents", newSub.Username, totalMatches)
+	log.Printf("Starting round-robin for %s (%d opponents)", newSub.Username, totalMatches)
 	matchNum := 0
 
 	// Run matches against unplayed opponents only
 	for _, opponent := range unplayedOpponents {
 		matchNum++
-		log.Printf("[%d/%d] Running match: %s vs %s (1000 games)", matchNum, totalMatches, newSub.Username, opponent.Username)
 		
 		// Run match (1000 games total)
 		player1Wins, player2Wins, totalMoves := runHeadToHead(newSub, opponent, 1000)
@@ -190,10 +188,10 @@ func runRoundRobinMatches(newSub Submission) {
 		
 		if player1Wins > player2Wins {
 			winnerID = newSub.ID
-			log.Printf("[%d/%d] Match result: %s wins (%d-%d, avg %d moves)", matchNum, totalMatches, newSub.Username, player1Wins, player2Wins, avgMoves)
+			log.Printf("[%d/%d] %s defeats %s (%d-%d, %d moves avg)", matchNum, totalMatches, newSub.Username, opponent.Username, player1Wins, player2Wins, avgMoves)
 		} else if player2Wins > player1Wins {
 			winnerID = opponent.ID
-			log.Printf("[%d/%d] Match result: %s wins (%d-%d, avg %d moves)", matchNum, totalMatches, opponent.Username, player2Wins, player1Wins, avgMoves)
+			log.Printf("[%d/%d] %s defeats %s (%d-%d, %d moves avg)", matchNum, totalMatches, opponent.Username, newSub.Username, player2Wins, player1Wins, avgMoves)
 		} else {
 			// Tie - coin flip
 			if totalMoves%2 == 0 {
@@ -201,20 +199,24 @@ func runRoundRobinMatches(newSub Submission) {
 			} else {
 				winnerID = opponent.ID
 			}
-			log.Printf("[%d/%d] Match result: Tie %d-%d, winner by coin flip: %d", matchNum, totalMatches, player1Wins, player2Wins, winnerID)
+			log.Printf("[%d/%d] Tie %d-%d, coin flip winner: %s", matchNum, totalMatches, player1Wins, player2Wins, 
+				map[int]string{newSub.ID: newSub.Username, opponent.ID: opponent.Username}[winnerID])
 		}
 		
 		// Store match result
 		if err := addMatch(newSub.ID, opponent.ID, winnerID, player1Wins, player2Wins, avgMoves, avgMoves); err != nil {
 			log.Printf("Failed to store match result: %v", err)
 		} else {
-			// Notify SSE clients of update after each match
-			log.Printf("Broadcasting leaderboard update after match %d/%d", matchNum, totalMatches)
+			// Update ELO ratings based on actual win percentages
+			if err := updateEloRatings(newSub.ID, opponent.ID, player1Wins, player2Wins); err != nil {
+				log.Printf("ELO update failed: %v", err)
+			}
+			
 			NotifyLeaderboardUpdate()
 		}
 	}
 	
-	log.Printf("Round-robin complete for %s (%d new matches)", newSub.Username, totalMatches)
+	log.Printf("✓ Round-robin complete for %s (%d matches)", newSub.Username, totalMatches)
 }
 
 func runHeadToHead(player1, player2 Submission, numGames int) (int, int, int) {

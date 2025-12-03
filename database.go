@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"math"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -14,6 +15,7 @@ type LeaderboardEntry struct {
 	Wins       int
 	Losses     int
 	WinPct     float64
+	Elo        int
 	AvgMoves   float64
 	Stage      string
 	LastPlayed time.Time
@@ -65,7 +67,8 @@ func initDB(path string) (*sql.DB, error) {
 		filename TEXT NOT NULL,
 		upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		status TEXT DEFAULT 'pending',
-		is_active BOOLEAN DEFAULT 1
+		is_active BOOLEAN DEFAULT 1,
+		elo_rating INTEGER DEFAULT 1500
 	);
 
 	CREATE TABLE IF NOT EXISTS tournaments (
@@ -133,6 +136,7 @@ func getLeaderboard(limit int) ([]LeaderboardEntry, error) {
 	query := `
 	SELECT 
 		s.username,
+		s.elo_rating,
 		SUM(CASE WHEN m.player1_id = s.id THEN m.player1_wins WHEN m.player2_id = s.id THEN m.player2_wins ELSE 0 END) as total_wins,
 		SUM(CASE WHEN m.player1_id = s.id THEN m.player2_wins WHEN m.player2_id = s.id THEN m.player1_wins ELSE 0 END) as total_losses,
 		AVG(CASE WHEN m.player1_id = s.id THEN m.player1_moves ELSE m.player2_moves END) as avg_moves,
@@ -140,9 +144,9 @@ func getLeaderboard(limit int) ([]LeaderboardEntry, error) {
 	FROM submissions s
 	LEFT JOIN matches m ON (m.player1_id = s.id OR m.player2_id = s.id) AND m.is_valid = 1
 	WHERE s.is_active = 1
-	GROUP BY s.username
+	GROUP BY s.username, s.elo_rating
 	HAVING COUNT(m.id) > 0
-	ORDER BY (CAST(total_wins AS REAL) / (total_wins + total_losses)) DESC, avg_moves ASC
+	ORDER BY s.elo_rating DESC, total_wins DESC
 	LIMIT ?
 	`
 
@@ -156,7 +160,7 @@ func getLeaderboard(limit int) ([]LeaderboardEntry, error) {
 	for rows.Next() {
 		var e LeaderboardEntry
 		var lastPlayed string
-		err := rows.Scan(&e.Username, &e.Wins, &e.Losses, &e.AvgMoves, &lastPlayed)
+		err := rows.Scan(&e.Username, &e.Elo, &e.Wins, &e.Losses, &e.AvgMoves, &lastPlayed)
 		if err != nil {
 			return nil, err
 		}
@@ -286,6 +290,71 @@ func getUserSubmissions(username string) ([]Submission, error) {
 	}
 
 	return submissions, rows.Err()
+}
+
+func calculateEloChange(player1Rating, player2Rating, player1TotalGames, player2TotalGames int, player1Score float64) (int, int) {
+	// K-factor: higher for fewer games (more volatile), lower for experienced players
+	kPlayer1 := 32
+	kPlayer2 := 32
+	
+	if player1TotalGames > 500 {
+		kPlayer1 = 16
+	}
+	if player2TotalGames > 500 {
+		kPlayer2 = 16
+	}
+	
+	// Expected scores
+	expectedPlayer1 := 1.0 / (1.0 + math.Pow(10, float64(player2Rating-player1Rating)/400.0))
+	expectedPlayer2 := 1.0 / (1.0 + math.Pow(10, float64(player1Rating-player2Rating)/400.0))
+	
+	// Actual scores (player1Score is win percentage, player2Score is 1-player1Score)
+	player2Score := 1.0 - player1Score
+	
+	// Rating changes based on difference between actual and expected
+	player1Change := int(float64(kPlayer1) * (player1Score - expectedPlayer1))
+	player2Change := int(float64(kPlayer2) * (player2Score - expectedPlayer2))
+	
+	return player1Change, player2Change
+}
+
+func updateEloRatings(player1ID, player2ID, player1Wins, player2Wins int) error {
+	// Get current ratings and match counts
+	var player1Rating, player2Rating, player1Games, player2Games int
+	
+	err := globalDB.QueryRow(`
+		SELECT s.elo_rating, 
+		       (SELECT COUNT(*) FROM matches m WHERE (m.player1_id = s.id OR m.player2_id = s.id) AND m.is_valid = 1)
+		FROM submissions s WHERE s.id = ?
+	`, player1ID).Scan(&player1Rating, &player1Games)
+	if err != nil {
+		return err
+	}
+	
+	err = globalDB.QueryRow(`
+		SELECT s.elo_rating,
+		       (SELECT COUNT(*) FROM matches m WHERE (m.player1_id = s.id OR m.player2_id = s.id) AND m.is_valid = 1)
+		FROM submissions s WHERE s.id = ?
+	`, player2ID).Scan(&player2Rating, &player2Games)
+	if err != nil {
+		return err
+	}
+	
+	// Calculate player1's actual score (win percentage)
+	totalGames := player1Wins + player2Wins
+	player1Score := float64(player1Wins) / float64(totalGames)
+	
+	// Calculate rating changes based on actual performance
+	player1Change, player2Change := calculateEloChange(player1Rating, player2Rating, player1Games, player2Games, player1Score)
+	
+	// Update ratings
+	_, err = globalDB.Exec("UPDATE submissions SET elo_rating = ? WHERE id = ?", player1Rating+player1Change, player1ID)
+	if err != nil {
+		return err
+	}
+	
+	_, err = globalDB.Exec("UPDATE submissions SET elo_rating = ? WHERE id = ?", player2Rating+player2Change, player2ID)
+	return err
 }
 
 func hasMatchBetween(player1ID, player2ID int) (bool, error) {

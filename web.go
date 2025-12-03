@@ -152,10 +152,11 @@ const leaderboardHTML = `
         }
         
         th:first-child { width: 80px; }
-        th:nth-child(3), th:nth-child(4) { width: 100px; }
-        th:nth-child(5) { width: 120px; }
-        th:nth-child(6) { width: 120px; }
-        th:last-child { width: 150px; }
+        th:nth-child(3) { width: 90px; }  /* ELO */
+        th:nth-child(4), th:nth-child(5) { width: 100px; }  /* Wins, Losses */
+        th:nth-child(6) { width: 120px; }  /* Win Rate */
+        th:nth-child(7) { width: 120px; }  /* Avg Moves */
+        th:last-child { width: 150px; }  /* Last Active */
         
         tbody tr {
             border-bottom: 1px solid #334155;
@@ -292,7 +293,7 @@ const leaderboardHTML = `
             if (!tbody) return;
             
             if (entries.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="empty-state-icon">🎯</div><div>No submissions yet. Be the first to compete!</div></div></td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><div class="empty-state-icon">🎯</div><div>No submissions yet. Be the first to compete!</div></div></td></tr>';
                 return;
             }
             
@@ -312,6 +313,7 @@ const leaderboardHTML = `
                 return '<tr>' +
                     '<td class="rank rank-' + rank + '">' + medal + '</td>' +
                     '<td class="player-name">' + e.Username + '</td>' +
+                    '<td><strong>' + e.Elo + '</strong></td>' +
                     '<td>' + e.Wins.toLocaleString() + '</td>' +
                     '<td>' + e.Losses.toLocaleString() + '</td>' +
                     '<td><span class="win-rate ' + winRateClass + '">' + winRate + '%</span></td>' +
@@ -364,6 +366,7 @@ const leaderboardHTML = `
                     <tr>
                         <th>Rank</th>
                         <th>Player</th>
+                        <th>ELO</th>
                         <th>Wins</th>
                         <th>Losses</th>
                         <th>Win Rate</th>
@@ -377,6 +380,7 @@ const leaderboardHTML = `
                     <tr>
                         <td class="rank rank-{{add $i 1}}">{{if lt $i 3}}{{medal $i}}{{else}}{{add $i 1}}{{end}}</td>
                         <td class="player-name">{{$e.Username}}</td>
+                        <td><strong>{{$e.Elo}}</strong></td>
                         <td>{{$e.Wins}}</td>
                         <td>{{$e.Losses}}</td>
                         <td><span class="win-rate {{winRateClass $e}}">{{winRate $e}}%</span></td>
@@ -386,7 +390,7 @@ const leaderboardHTML = `
                     {{end}}
                     {{else}}
                     <tr>
-                        <td colspan="7">
+                        <td colspan="8">
                             <div class="empty-state">
                                 <div class="empty-state-icon">🎯</div>
                                 <div>No submissions yet. Be the first to compete!</div>
