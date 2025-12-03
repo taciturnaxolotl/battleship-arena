@@ -23,6 +23,7 @@ const (
 	host      = "0.0.0.0"
 	sshPort   = "2222"
 	webPort   = "8080"
+	ssePort   = "8081"
 	uploadDir = "./submissions"
 	resultsDB = "./results.db"
 )
@@ -32,6 +33,12 @@ func main() {
 	if err := initStorage(); err != nil {
 		log.Fatal(err)
 	}
+
+	// Initialize SSE server
+	initSSE()
+
+	// Start SSE server on separate port
+	go startSSEServer()
 
 	// Start background worker
 	workerCtx, workerCancel := context.WithCancel(context.Background())
@@ -112,14 +119,42 @@ func startWebServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleLeaderboard)
 	mux.HandleFunc("/api/leaderboard", handleAPILeaderboard)
-	mux.HandleFunc("/api/bracket", handleBracketData)
 	
 	// Serve static files
 	fs := http.FileServer(http.Dir("./static"))
 	mux.Handle("/static/", http.StripPrefix("/static/", fs))
 	
+	server := &http.Server{
+		Addr:           ":" + webPort,
+		Handler:        mux,
+		ReadTimeout:    0, // No timeout for SSE
+		WriteTimeout:   0, // No timeout for SSE
+		MaxHeaderBytes: 1 << 20,
+	}
+	
 	log.Printf("Web server starting on :%s", webPort)
-	if err := http.ListenAndServe(":"+webPort, mux); err != nil {
+	if err := server.ListenAndServe(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func startSSEServer() {
+	// Wrap SSE server with CORS middleware
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		
+		sseServer.ServeHTTP(w, r)
+	})
+	
+	log.Printf("SSE server starting on :%s", ssePort)
+	if err := http.ListenAndServe(":"+ssePort, handler); err != nil {
 		log.Fatal(err)
 	}
 }

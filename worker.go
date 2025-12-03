@@ -15,9 +15,6 @@ func startWorker(ctx context.Context) {
 	if err := processSubmissions(); err != nil {
 		log.Printf("Worker error (submissions): %v", err)
 	}
-	if err := processBracketMatches(); err != nil {
-		log.Printf("Worker error (bracket): %v", err)
-	}
 
 	for {
 		select {
@@ -26,9 +23,6 @@ func startWorker(ctx context.Context) {
 		case <-ticker.C:
 			if err := processSubmissions(); err != nil {
 				log.Printf("Worker error (submissions): %v", err)
-			}
-			if err := processBracketMatches(); err != nil {
-				log.Printf("Worker error (bracket): %v", err)
 			}
 		}
 	}

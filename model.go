@@ -189,8 +189,8 @@ func renderLeaderboard(entries []LeaderboardEntry) string {
 	b.WriteString(lipgloss.NewStyle().Bold(true).Render("🏆 Leaderboard") + "\n\n")
 
 	// Header without styling on the whole line
-	b.WriteString(fmt.Sprintf("%-4s %-20s %-12s %8s %8s %10s %10s\n", 
-		"Rank", "User", "Stage", "Wins", "Losses", "Win Rate", "Avg Moves"))
+	b.WriteString(fmt.Sprintf("%-4s %-20s %8s %8s %10s %10s\n", 
+		"Rank", "User", "Wins", "Losses", "Win Rate", "Avg Moves"))
 
 	for i, entry := range entries {
 		winRate := 0.0
@@ -213,23 +213,9 @@ func renderLeaderboard(entries []LeaderboardEntry) string {
 			coloredRank = rank
 		}
 		
-		// Color stage badge
-		var stageColor string
-		switch entry.Stage {
-		case "Expert":
-			stageColor = "green"
-		case "Advanced":
-			stageColor = "blue"
-		case "Intermediate":
-			stageColor = "yellow"
-		default:
-			stageColor = "240"
-		}
-		coloredStage := lipgloss.NewStyle().Foreground(lipgloss.Color(stageColor)).Render(entry.Stage)
-		
 		// Format line with proper spacing
-		b.WriteString(fmt.Sprintf("%-4s %-20s %-12s %8d %8d %9.2f%% %9.1f\n",
-			coloredRank, entry.Username, coloredStage, entry.Wins, entry.Losses, winRate, entry.AvgMoves))
+		b.WriteString(fmt.Sprintf("%-4s %-20s %8d %8d %9.2f%% %9.1f\n",
+			coloredRank, entry.Username, entry.Wins, entry.Losses, winRate, entry.AvgMoves))
 	}
 
 	return b.String()

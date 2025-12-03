@@ -14,7 +14,6 @@ const leaderboardHTML = `
     <title>Battleship Arena - Leaderboard</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="/static/brackets-viewer.min.css" />
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
@@ -138,40 +137,94 @@ const leaderboardHTML = `
             font-size: 0.9em;
             margin-top: 20px;
         }
-        .bracket-section {
-            margin: 40px 0;
-            background: white;
-            padding: 20px;
-            border-radius: 12px;
+        .live-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #10b981;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+            margin-right: 8px;
         }
-        .bracket-section h2 {
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .status-bar {
             text-align: center;
-            color: #333;
-            margin-bottom: 30px;
+            color: #10b981;
+            margin-bottom: 20px;
+            font-size: 0.9em;
         }
     </style>
-    <script type="text/javascript" src="/static/brackets-viewer.min.js"></script>
     <script>
-        // Auto-refresh every 30 seconds
-        setTimeout(() => location.reload(), 30000);
+        // Server-Sent Events for live updates
+        let eventSource;
         
-        // Load and render bracket data
-        window.addEventListener('DOMContentLoaded', async () => {
-            try {
-                const response = await fetch('/api/bracket');
-                const data = await response.json();
-                
-                if (data.matches && data.matches.length > 0) {
-                    window.bracketsViewer.render({
-                        stages: data.stages,
-                        matches: data.matches,
-                        matchGames: data.matchGames,
-                        participants: data.participants,
-                    });
+        function connectSSE() {
+            console.log('Connecting to SSE...');
+            eventSource = new EventSource('http://localhost:8081');
+            
+            eventSource.onopen = function() {
+                console.log('SSE connection established');
+            };
+            
+            eventSource.onmessage = function(event) {
+                console.log('SSE message received:', event.data.substring(0, 100) + '...');
+                try {
+                    const entries = JSON.parse(event.data);
+                    console.log('Updating leaderboard with', entries.length, 'entries');
+                    updateLeaderboard(entries);
+                } catch (error) {
+                    console.error('Failed to parse SSE data:', error);
                 }
-            } catch (error) {
-                console.error('Failed to load bracket data:', error);
+            };
+            
+            eventSource.onerror = function(error) {
+                console.error('SSE error, reconnecting...', error);
+                eventSource.close();
+                setTimeout(connectSSE, 5000);
+            };
+        }
+        
+        function updateLeaderboard(entries) {
+            const tbody = document.querySelector('tbody');
+            if (!tbody) return;
+            
+            if (entries.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 40px; color: #999;">No submissions yet. Be the first to compete!</td></tr>';
+                return;
             }
+            
+            tbody.innerHTML = entries.map((e, i) => {
+                const rank = i + 1;
+                const total = e.Wins + e.Losses;
+                const winRate = total === 0 ? 0 : ((e.Wins / total) * 100).toFixed(1);
+                const winRateClass = winRate >= 80 ? 'win-rate-high' : winRate >= 50 ? 'win-rate-med' : 'win-rate-low';
+                const medals = ['🥇', '🥈', '🥉'];
+                const medal = medals[i] || '#' + rank;
+                const lastPlayed = new Date(e.LastPlayed).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+                
+                return '<tr>' +
+                    '<td class="rank rank-' + rank + '">' + medal + '</td>' +
+                    '<td><strong>' + e.Username + '</strong></td>' +
+                    '<td>' + e.Wins + '</td>' +
+                    '<td>' + e.Losses + '</td>' +
+                    '<td class="win-rate ' + winRateClass + '">' + winRate + '%</td>' +
+                    '<td>' + e.AvgMoves.toFixed(1) + '</td>' +
+                    '<td>' + lastPlayed + '</td>' +
+                    '</tr>';
+            }).join('');
+            
+            // Update stats
+            const statValues = document.querySelectorAll('.stat-value');
+            statValues[0].textContent = entries.length;
+            const totalGames = entries.reduce((sum, e) => sum + e.Wins + e.Losses, 0) / 2;
+            statValues[1].textContent = Math.floor(totalGames);
+        }
+        
+        window.addEventListener('DOMContentLoaded', () => {
+            connectSSE();
         });
     </script>
 </head>
@@ -180,18 +233,16 @@ const leaderboardHTML = `
         <h1>🚢 Battleship Arena</h1>
         <p class="subtitle">Smart AI Competition</p>
         
-        <div class="bracket-section">
-            <h2>⚔️ Tournament Bracket</h2>
-            <div class="brackets-viewer"></div>
+        <div class="status-bar">
+            <span class="live-indicator"></span>Live Updates Active
         </div>
         
-        <h2 style="text-align: center; color: #333; margin-top: 60px;">📊 Rankings</h2>
+        <h2 style="text-align: center; color: #333;">📊 Rankings</h2>
         <table>
             <thead>
                 <tr>
                     <th>Rank</th>
                     <th>Player</th>
-                    <th>Stage</th>
                     <th>Wins</th>
                     <th>Losses</th>
                     <th>Win Rate</th>
@@ -205,7 +256,6 @@ const leaderboardHTML = `
                 <tr>
                     <td class="rank rank-{{add $i 1}}">{{if lt $i 3}}{{medal $i}}{{else}}#{{add $i 1}}{{end}}</td>
                     <td><strong>{{$e.Username}}</strong></td>
-                    <td><span class="stage stage-{{$e.Stage}}">{{$e.Stage}}</span></td>
                     <td>{{$e.Wins}}</td>
                     <td>{{$e.Losses}}</td>
                     <td class="win-rate {{winRateClass $e}}">{{winRate $e}}%</td>
@@ -241,7 +291,7 @@ const leaderboardHTML = `
             <p style="margin-top: 10px;">Then navigate to upload your <code>memory_functions_*.cpp</code> file.</p>
         </div>
 
-        <p class="refresh-note">Page auto-refreshes every 30 seconds</p>
+        <p class="refresh-note">Updates in real-time via Server-Sent Events</p>
     </div>
 </body>
 </html>
@@ -336,173 +386,7 @@ func handleAPILeaderboard(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(entries)
 }
 
-func handleBracketData(w http.ResponseWriter, r *http.Request) {
-	// Get latest tournament (active or completed)
-	tournament, err := getLatestTournament()
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to load tournament: %v", err), http.StatusInternalServerError)
-		return
-	}
-	
-	if tournament == nil {
-		// No tournament yet
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"stages":       []map[string]interface{}{},
-			"matches":      []map[string]interface{}{},
-			"participants": []map[string]interface{}{},
-		})
-		return
-	}
-	
-	// Get all bracket matches
-	matches, err := getAllBracketMatches(tournament.ID)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to load matches: %v", err), http.StatusInternalServerError)
-		return
-	}
 
-	if matches == nil {
-		matches = []BracketMatch{}
-	}
-
-	// Get unique participants (skip byes where ID = 0)
-	participantMap := make(map[int]int) // submissionID -> participantID
-	participants := []map[string]interface{}{}
-	participantID := 1
-
-	for _, match := range matches {
-		if match.Player1ID > 0 && match.Player1Name != "" {
-			if _, exists := participantMap[match.Player1ID]; !exists {
-				participantMap[match.Player1ID] = participantID
-				participants = append(participants, map[string]interface{}{
-					"id":   participantID,
-					"name": match.Player1Name,
-				})
-				participantID++
-			}
-		}
-		if match.Player2ID > 0 && match.Player2Name != "" {
-			if _, exists := participantMap[match.Player2ID]; !exists {
-				participantMap[match.Player2ID] = participantID
-				participants = append(participants, map[string]interface{}{
-					"id":   participantID,
-					"name": match.Player2Name,
-				})
-				participantID++
-			}
-		}
-	}
-
-	// Group matches by round for bracket format
-	roundMatches := make(map[int][]BracketMatch)
-	maxRound := 0
-	for _, match := range matches {
-		roundMatches[match.Round] = append(roundMatches[match.Round], match)
-		if match.Round > maxRound {
-			maxRound = match.Round
-		}
-	}
-
-	// Create match data in brackets-viewer format (single elimination)
-	bracketMatches := []map[string]interface{}{}
-	matchNumber := 1
-	
-	for round := 1; round <= maxRound; round++ {
-		for _, match := range roundMatches[round] {
-			var opponent1, opponent2 map[string]interface{}
-			
-			// Player 1
-			if match.Player1ID > 0 {
-				result := "loss"
-				if match.WinnerID == match.Player1ID {
-					result = "win"
-				}
-				opponent1 = map[string]interface{}{
-					"id":     participantMap[match.Player1ID],
-					"result": result,
-					"score":  match.Player1Wins,
-				}
-			} else {
-				opponent1 = nil // Bye
-			}
-			
-			// Player 2
-			if match.Player2ID > 0 {
-				result := "loss"
-				if match.WinnerID == match.Player2ID {
-					result = "win"
-				}
-				opponent2 = map[string]interface{}{
-					"id":     participantMap[match.Player2ID],
-					"result": result,
-					"score":  match.Player2Wins,
-				}
-			} else {
-				opponent2 = nil // Bye
-			}
-
-			status := "pending"
-			if match.Status == "completed" {
-				status = "completed"
-			}
-
-			bracketMatches = append(bracketMatches, map[string]interface{}{
-				"id":         matchNumber,
-				"stage_id":   1,
-				"group_id":   1,
-				"round_id":   round,
-				"number":     match.Position + 1,
-				"opponent1":  opponent1,
-				"opponent2":  opponent2,
-				"status":     status,
-			})
-			matchNumber++
-		}
-	}
-
-	// Create stage data for single elimination
-	// Calculate bracket size (next power of 2)
-	bracketSize := 1
-	for bracketSize < len(participants) {
-		bracketSize *= 2
-	}
-	
-	stages := []map[string]interface{}{
-		{
-			"id":     1,
-			"name":   "Tournament",
-			"type":   "single_elimination",
-			"number": 1,
-			"settings": map[string]interface{}{
-				"size":           bracketSize,
-				"seedOrdering":   []string{"natural"},
-				"grandFinal":     "none",
-				"skipFirstRound": false,
-			},
-		},
-	}
-	
-	// Create groups array (required for brackets-viewer)
-	groups := []map[string]interface{}{
-		{
-			"id":       1,
-			"stage_id": 1,
-			"number":   1,
-		},
-	}
-
-	data := map[string]interface{}{
-		"stages":       stages,
-		"groups":       groups,
-		"matches":      bracketMatches,
-		"matchGames":   []map[string]interface{}{},
-		"participants": participants,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
-}
 
 func calculateTotalGames(entries []LeaderboardEntry) int {
 	total := 0

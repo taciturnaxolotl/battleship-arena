@@ -31,8 +31,9 @@ func processSubmissions() error {
 		log.Printf("Submission %d compiled successfully: %s by %s", sub.ID, sub.Filename, sub.Username)
 		updateSubmissionStatus(sub.ID, "completed")
 		
-		// Tournament will be created/updated by processBracketMatches
-		log.Printf("Submission %d ready for tournament", sub.ID)
+		// Run round-robin matches
+		log.Printf("Starting round-robin matches for submission %d", sub.ID)
+		runRoundRobinMatches(sub)
 	}
 
 	return nil
@@ -128,95 +129,7 @@ func compileSubmission(sub Submission) error {
 	return nil
 }
 
-func processBracketMatches() error {
-	// Ensure tournament exists
-	tournament, err := ensureTournamentExists()
-	if err != nil {
-		return fmt.Errorf("failed to ensure tournament: %v", err)
-	}
-	
-	if tournament.Status != "active" {
-		log.Println("Tournament is complete, skipping match processing")
-		return nil
-	}
-	
-	// Get pending matches for current tournament
-	matches, err := getPendingBracketMatches(tournament.ID)
-	if err != nil {
-		return fmt.Errorf("failed to get pending matches: %v", err)
-	}
-	
-	if len(matches) == 0 {
-		log.Println("No pending bracket matches")
-		return nil
-	}
-	
-	// Process each match
-	for _, match := range matches {
-		log.Printf("Running bracket match: %s vs %s (Round %d, Position %d)", 
-			match.Player1Name, match.Player2Name, match.Round, match.Position)
-		
-		// Get submission details
-		player1, err := getSubmissionByID(match.Player1ID)
-		if err != nil {
-			log.Printf("Failed to get player1 submission: %v", err)
-			continue
-		}
-		
-		player2, err := getSubmissionByID(match.Player2ID)
-		if err != nil {
-			log.Printf("Failed to get player2 submission: %v", err)
-			continue
-		}
-		
-		// Run head-to-head match (1000 games)
-		player1Wins, player2Wins, totalMoves := runHeadToHead(player1, player2, 1000)
-		
-		avgMovesP1 := totalMoves / 2000  // Each player plays ~500 games
-		avgMovesP2 := avgMovesP1
-		
-		// Determine winner
-		var winnerID int
-		if player1Wins > player2Wins {
-			winnerID = match.Player1ID
-			log.Printf("Match result: %s wins (%d-%d)", match.Player1Name, player1Wins, player2Wins)
-		} else if player2Wins > player1Wins {
-			winnerID = match.Player2ID
-			log.Printf("Match result: %s wins (%d-%d)", match.Player2Name, player2Wins, player1Wins)
-		} else {
-			// Tie - better average moves wins
-			if avgMovesP1 < avgMovesP2 {
-				winnerID = match.Player1ID
-			} else {
-				winnerID = match.Player2ID
-			}
-			log.Printf("Match result: Tie %d-%d, winner by avg moves: ID %d", player1Wins, player2Wins, winnerID)
-		}
-		
-		// Update match result
-		err = updateBracketMatchResult(match.ID, winnerID, player1Wins, player2Wins, avgMovesP1, avgMovesP2)
-		if err != nil {
-			log.Printf("Failed to update bracket match: %v", err)
-			continue
-		}
-	}
-	
-	// Check if current round is complete
-	complete, err := isRoundComplete(tournament.ID, tournament.CurrentRound)
-	if err != nil {
-		return fmt.Errorf("failed to check round completion: %v", err)
-	}
-	
-	if complete {
-		log.Printf("Round %d complete, advancing winners", tournament.CurrentRound)
-		err = advanceWinners(tournament.ID, tournament.CurrentRound)
-		if err != nil {
-			return fmt.Errorf("failed to advance winners: %v", err)
-		}
-	}
-	
-	return nil
-}
+
 
 func getSubmissionByID(id int) (Submission, error) {
 	var sub Submission
@@ -227,8 +140,7 @@ func getSubmissionByID(id int) (Submission, error) {
 	return sub, err
 }
 
-// Deprecated: replaced by bracket tournament
-func runTournamentMatches(newSub Submission) {
+func runRoundRobinMatches(newSub Submission) {
 	// Get all active submissions
 	activeSubmissions, err := getActiveSubmissions()
 	if err != nil {
@@ -236,13 +148,23 @@ func runTournamentMatches(newSub Submission) {
 		return
 	}
 
+	totalMatches := len(activeSubmissions) - 1 // Exclude self
+	if totalMatches <= 0 {
+		log.Printf("No opponents for %s, skipping matches", newSub.Username)
+		return
+	}
+
+	log.Printf("Starting round-robin for %s against %d opponents", newSub.Username, totalMatches)
+	matchNum := 0
+
 	// Run matches against all other submissions
 	for _, opponent := range activeSubmissions {
 		if opponent.ID == newSub.ID {
 			continue
 		}
 		
-		log.Printf("Running match: %s vs %s (1000 games)", newSub.Username, opponent.Username)
+		matchNum++
+		log.Printf("[%d/%d] Running match: %s vs %s (1000 games)", matchNum, totalMatches, newSub.Username, opponent.Username)
 		
 		// Run match (1000 games total)
 		player1Wins, player2Wins, totalMoves := runHeadToHead(newSub, opponent, 1000)
@@ -253,10 +175,10 @@ func runTournamentMatches(newSub Submission) {
 		
 		if player1Wins > player2Wins {
 			winnerID = newSub.ID
-			log.Printf("Match result: %s wins (%d-%d, avg %d moves)", newSub.Username, player1Wins, player2Wins, avgMoves)
+			log.Printf("[%d/%d] Match result: %s wins (%d-%d, avg %d moves)", matchNum, totalMatches, newSub.Username, player1Wins, player2Wins, avgMoves)
 		} else if player2Wins > player1Wins {
 			winnerID = opponent.ID
-			log.Printf("Match result: %s wins (%d-%d, avg %d moves)", opponent.Username, player2Wins, player1Wins, avgMoves)
+			log.Printf("[%d/%d] Match result: %s wins (%d-%d, avg %d moves)", matchNum, totalMatches, opponent.Username, player2Wins, player1Wins, avgMoves)
 		} else {
 			// Tie - coin flip
 			if totalMoves%2 == 0 {
@@ -264,14 +186,20 @@ func runTournamentMatches(newSub Submission) {
 			} else {
 				winnerID = opponent.ID
 			}
-			log.Printf("Match result: Tie %d-%d, winner by coin flip: %d", player1Wins, player2Wins, winnerID)
+			log.Printf("[%d/%d] Match result: Tie %d-%d, winner by coin flip: %d", matchNum, totalMatches, player1Wins, player2Wins, winnerID)
 		}
 		
 		// Store match result
-		if err := addMatch(newSub.ID, opponent.ID, winnerID, avgMoves, avgMoves); err != nil {
+		if err := addMatch(newSub.ID, opponent.ID, winnerID, player1Wins, player2Wins, avgMoves, avgMoves); err != nil {
 			log.Printf("Failed to store match result: %v", err)
+		} else {
+			// Notify SSE clients of update after each match
+			log.Printf("Broadcasting leaderboard update after match %d/%d", matchNum, totalMatches)
+			NotifyLeaderboardUpdate()
 		}
 	}
+	
+	log.Printf("Round-robin complete for %s (%d matches)", newSub.Username, totalMatches)
 }
 
 func runHeadToHead(player1, player2 Submission, numGames int) (int, int, int) {

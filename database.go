@@ -101,6 +101,8 @@ func initDB(path string) (*sql.DB, error) {
 		player1_id INTEGER,
 		player2_id INTEGER,
 		winner_id INTEGER,
+		player1_wins INTEGER DEFAULT 0,
+		player2_wins INTEGER DEFAULT 0,
 		player1_moves INTEGER,
 		player2_moves INTEGER,
 		timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -127,16 +129,16 @@ func getLeaderboard(limit int) ([]LeaderboardEntry, error) {
 	query := `
 	SELECT 
 		s.username,
-		COUNT(CASE WHEN bm.winner_id = s.id THEN 1 END) as wins,
-		COUNT(CASE WHEN (bm.player1_id = s.id OR bm.player2_id = s.id) AND bm.winner_id != s.id AND bm.winner_id IS NOT NULL THEN 1 END) as losses,
-		AVG(CASE WHEN bm.player1_id = s.id THEN bm.player1_moves ELSE bm.player2_moves END) as avg_moves,
-		MAX(bm.timestamp) as last_played
+		SUM(CASE WHEN m.player1_id = s.id THEN m.player1_wins WHEN m.player2_id = s.id THEN m.player2_wins ELSE 0 END) as total_wins,
+		SUM(CASE WHEN m.player1_id = s.id THEN m.player2_wins WHEN m.player2_id = s.id THEN m.player1_wins ELSE 0 END) as total_losses,
+		AVG(CASE WHEN m.player1_id = s.id THEN m.player1_moves ELSE m.player2_moves END) as avg_moves,
+		MAX(m.timestamp) as last_played
 	FROM submissions s
-	LEFT JOIN bracket_matches bm ON (bm.player1_id = s.id OR bm.player2_id = s.id) AND bm.status = 'completed'
+	LEFT JOIN matches m ON (m.player1_id = s.id OR m.player2_id = s.id)
 	WHERE s.is_active = 1
 	GROUP BY s.username
-	HAVING COUNT(bm.id) > 0
-	ORDER BY wins DESC, losses ASC, avg_moves ASC
+	HAVING COUNT(m.id) > 0
+	ORDER BY total_wins DESC, total_losses ASC, avg_moves ASC
 	LIMIT ?
 	`
 
@@ -157,18 +159,6 @@ func getLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		
 		// Parse the timestamp string
 		e.LastPlayed, _ = time.Parse("2006-01-02 15:04:05", lastPlayed)
-		
-		// Determine stage based on average moves
-		// Based on random AI benchmark: avg=95.459, p25=94, p75=99
-		if e.AvgMoves >= 99 {
-			e.Stage = "Beginner"
-		} else if e.AvgMoves >= 95 {
-			e.Stage = "Intermediate"
-		} else if e.AvgMoves >= 85 {
-			e.Stage = "Advanced"
-		} else {
-			e.Stage = "Expert"
-		}
 		
 		entries = append(entries, e)
 	}
@@ -197,10 +187,10 @@ func addSubmission(username, filename string) (int64, error) {
 	return result.LastInsertId()
 }
 
-func addMatch(player1ID, player2ID, winnerID, player1Moves, player2Moves int) error {
+func addMatch(player1ID, player2ID, winnerID, player1Wins, player2Wins, player1Moves, player2Moves int) error {
 	_, err := globalDB.Exec(
-		"INSERT INTO matches (player1_id, player2_id, winner_id, player1_moves, player2_moves) VALUES (?, ?, ?, ?, ?)",
-		player1ID, player2ID, winnerID, player1Moves, player2Moves,
+		"INSERT INTO matches (player1_id, player2_id, winner_id, player1_wins, player2_wins, player1_moves, player2_moves) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		player1ID, player2ID, winnerID, player1Wins, player2Wins, player1Moves, player2Moves,
 	)
 	return err
 }
