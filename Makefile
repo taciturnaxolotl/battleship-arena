@@ -3,17 +3,17 @@
 # Build the battleship arena server
 build:
 	@echo "Building battleship-arena..."
-	@go build -o battleship-arena
+	@go build -o bin/battleship-arena ./cmd/battleship-arena
 
 # Run the server
 run: build
 	@echo "Starting battleship-arena..."
-	@./battleship-arena
+	@./bin/battleship-arena
 
 # Clean build artifacts
 clean:
 	@echo "Cleaning..."
-	@rm -f battleship-arena
+	@rm -rf bin/
 	@rm -rf submissions/ .ssh/ *.db
 
 # Run tests
@@ -46,7 +46,7 @@ deps:
 # Build for production (optimized)
 build-prod:
 	@echo "Building for production..."
-	@CGO_ENABLED=1 go build -ldflags="-s -w" -o battleship-arena
+	@CGO_ENABLED=1 go build -ldflags="-s -w" -o bin/battleship-arena ./cmd/battleship-arena
 
 # Show help
 help:

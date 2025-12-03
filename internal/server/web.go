@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"encoding/json"
@@ -7,6 +7,8 @@ import (
 	"net/http"
 	
 	"github.com/go-chi/chi/v5"
+	
+	"battleship-arena/internal/storage"
 )
 
 const leaderboardHTML = `
@@ -620,10 +622,10 @@ var tmpl = template.Must(template.New("leaderboard").Funcs(template.FuncMap{
 		}
 		return ""
 	},
-	"winRate": func(e LeaderboardEntry) string {
+	"winRate": func(e storage.LeaderboardEntry) string {
 		return formatFloat(e.WinPct, 1)
 	},
-	"winRateClass": func(e LeaderboardEntry) string {
+	"winRateClass": func(e storage.LeaderboardEntry) string {
 		if e.WinPct >= 60 {
 			return "win-rate-high"
 		} else if e.WinPct >= 40 {
@@ -637,8 +639,8 @@ func formatFloat(f float64, decimals int) string {
 	return fmt.Sprintf("%.1f", f)
 }
 
-func handleLeaderboard(w http.ResponseWriter, r *http.Request) {
-	entries, err := getLeaderboard(50)
+func HandleLeaderboard(w http.ResponseWriter, r *http.Request) {
+	entries, err := storage.GetLeaderboard(50)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load leaderboard: %v", err), http.StatusInternalServerError)
 		return
@@ -646,18 +648,18 @@ func handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 
 	// Empty leaderboard is fine
 	if entries == nil {
-		entries = []LeaderboardEntry{}
+		entries = []storage.LeaderboardEntry{}
 	}
 	
 	// Get matches for bracket
-	matches, err := getAllMatches()
+	matches, err := storage.GetAllMatches()
 	if err != nil {
-		matches = []MatchResult{}
+		matches = []storage.MatchResult{}
 	}
 
 	data := struct {
-		Entries      []LeaderboardEntry
-		Matches      []MatchResult
+		Entries      []storage.LeaderboardEntry
+		Matches      []storage.MatchResult
 		TotalPlayers int
 		TotalGames   int
 	}{
@@ -672,8 +674,8 @@ func handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func handleAPILeaderboard(w http.ResponseWriter, r *http.Request) {
-	entries, err := getLeaderboard(50)
+func HandleAPILeaderboard(w http.ResponseWriter, r *http.Request) {
+	entries, err := storage.GetLeaderboard(50)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load leaderboard: %v", err), http.StatusInternalServerError)
 		return
@@ -681,7 +683,7 @@ func handleAPILeaderboard(w http.ResponseWriter, r *http.Request) {
 
 	// Empty leaderboard is fine
 	if entries == nil {
-		entries = []LeaderboardEntry{}
+		entries = []storage.LeaderboardEntry{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -690,7 +692,7 @@ func handleAPILeaderboard(w http.ResponseWriter, r *http.Request) {
 
 
 
-func calculateTotalGames(entries []LeaderboardEntry) int {
+func calculateTotalGames(entries []storage.LeaderboardEntry) int {
 	total := 0
 	for _, e := range entries {
 		total += e.Wins + e.Losses
@@ -698,7 +700,7 @@ func calculateTotalGames(entries []LeaderboardEntry) int {
 	return total / 2 // Each game counted twice (win+loss)
 }
 
-func handleRatingHistory(w http.ResponseWriter, r *http.Request) {
+func HandleRatingHistory(w http.ResponseWriter, r *http.Request) {
 	username := chi.URLParam(r, "player")
 	if username == "" {
 		http.Error(w, "Username required", http.StatusBadRequest)
@@ -707,7 +709,7 @@ func handleRatingHistory(w http.ResponseWriter, r *http.Request) {
 	
 	// Get submission ID for this username
 	var submissionID int
-	err := globalDB.QueryRow(
+	err := storage.DB.QueryRow(
 		"SELECT id FROM submissions WHERE username = ? AND is_active = 1",
 		username,
 	).Scan(&submissionID)
@@ -718,7 +720,7 @@ func handleRatingHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	// Get rating history
-	history, err := getRatingHistory(submissionID)
+	history, err := storage.GetRatingHistory(submissionID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to get rating history: %v", err), http.StatusInternalServerError)
 		return
@@ -728,7 +730,7 @@ func handleRatingHistory(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(history)
 }
 
-func handlePlayerPage(w http.ResponseWriter, r *http.Request) {
+func HandlePlayerPage(w http.ResponseWriter, r *http.Request) {
 	username := chi.URLParam(r, "player")
 	if username == "" {
 		http.Redirect(w, r, "/", http.StatusSeeOther)

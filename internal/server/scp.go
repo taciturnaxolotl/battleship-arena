@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"fmt"
@@ -9,23 +9,24 @@ import (
 
 	"github.com/charmbracelet/ssh"
 	"github.com/charmbracelet/wish/scp"
+	
+	"battleship-arena/internal/storage"
 )
 
-func newSCPHandlers() (scp.CopyToClientHandler, scp.CopyFromClientHandler) {
-	// Use FileSystemHandler as base
+func NewSCPHandlers(uploadDir string) (scp.CopyToClientHandler, scp.CopyFromClientHandler) {
 	baseHandler := scp.NewFileSystemHandler(uploadDir)
 	
-	// Wrap it to add validation and user namespacing
 	uploadHandler := &validatingHandler{
 		baseHandler: baseHandler,
+		uploadDir:   uploadDir,
 	}
 	
-	// Return nil for downloads (disabled), wrapped handler for uploads
 	return nil, uploadHandler
 }
 
 type validatingHandler struct {
 	baseHandler scp.CopyFromClientHandler
+	uploadDir   string
 }
 
 func (h *validatingHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, error) {
@@ -44,8 +45,7 @@ func (h *validatingHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, e
 		return 0, fmt.Errorf("only memory_functions_*.cpp files are accepted")
 	}
 
-	// Create user-specific subdirectory
-	userDir := filepath.Join(uploadDir, s.User())
+	userDir := filepath.Join(h.uploadDir, s.User())
 	if err := os.MkdirAll(userDir, 0755); err != nil {
 		log.Printf("Failed to create user directory: %v", err)
 		return 0, err
@@ -66,7 +66,7 @@ func (h *validatingHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, e
 		Reader: entry.Reader,
 	}
 	
-	log.Printf("Writing to: %s", filepath.Join(uploadDir, userEntry.Name))
+	log.Printf("Writing to: %s", filepath.Join(h.uploadDir, userEntry.Name))
 
 	n, err := h.baseHandler.Write(s, userEntry)
 	if err != nil {
@@ -77,7 +77,7 @@ func (h *validatingHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, e
 	log.Printf("Uploaded %s from %s (%d bytes)", filename, s.User(), n)
 	
 	// Add submission and trigger testing
-	submissionID, err := addSubmission(s.User(), filename)
+	submissionID, err := storage.AddSubmission(s.User(), filename)
 	if err != nil {
 		log.Printf("Failed to add submission: %v", err)
 	} else {

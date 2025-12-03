@@ -1,4 +1,4 @@
-package main
+package tui
 
 import (
 	"fmt"
@@ -7,24 +7,37 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	
+	"battleship-arena/internal/storage"
 )
+
+const (
+	sshPort = "2222"
+	host    = "0.0.0.0"
+)
+
+var titleStyle = lipgloss.NewStyle().
+	Bold(true).
+	Foreground(lipgloss.Color("205")).
+	MarginTop(1).
+	MarginBottom(1)
 
 type model struct {
 	username     string
 	width        int
 	height       int
-	submissions  []Submission
-	leaderboard  []LeaderboardEntry
-	matches      []MatchResult
+	submissions  []storage.Submission
+	leaderboard  []storage.LeaderboardEntry
+	matches      []storage.MatchResult
 }
 
-func initialModel(username string, width, height int) model {
+func InitialModel(username string, width, height int) model {
 	return model{
 		username:    username,
 		width:       width,
 		height:      height,
-		submissions: []Submission{},
-		leaderboard: []LeaderboardEntry{},
+		submissions: []storage.Submission{},
+		leaderboard: []storage.LeaderboardEntry{},
 	}
 }
 
@@ -86,11 +99,11 @@ func (m model) View() string {
 
 
 type leaderboardMsg struct {
-	entries []LeaderboardEntry
+	entries []storage.LeaderboardEntry
 }
 
 func loadLeaderboard() tea.Msg {
-	entries, err := getLeaderboard(20)
+	entries, err := storage.GetLeaderboard(20)
 	if err != nil {
 		return leaderboardMsg{entries: nil}
 	}
@@ -98,12 +111,12 @@ func loadLeaderboard() tea.Msg {
 }
 
 type submissionsMsg struct {
-	submissions []Submission
+	submissions []storage.Submission
 }
 
 func loadSubmissions(username string) tea.Cmd {
 	return func() tea.Msg {
-		submissions, err := getUserSubmissions(username)
+		submissions, err := storage.GetUserSubmissions(username)
 		if err != nil {
 			return submissionsMsg{submissions: nil}
 		}
@@ -112,11 +125,11 @@ func loadSubmissions(username string) tea.Cmd {
 }
 
 type matchesMsg struct {
-	matches []MatchResult
+	matches []storage.MatchResult
 }
 
 func loadMatches() tea.Msg {
-	matches, err := getAllMatches()
+	matches, err := storage.GetAllMatches()
 	if err != nil {
 		return matchesMsg{matches: nil}
 	}
@@ -131,7 +144,7 @@ func tickCmd() tea.Cmd {
 	})
 }
 
-func renderSubmissions(submissions []Submission) string {
+func renderSubmissions(submissions []storage.Submission) string {
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Bold(true).Render("📤 Your Submissions") + "\n\n")
 
@@ -180,7 +193,7 @@ func formatRelativeTime(t time.Time) string {
 	return fmt.Sprintf("%dd ago", days)
 }
 
-func renderLeaderboard(entries []LeaderboardEntry) string {
+func renderLeaderboard(entries []storage.LeaderboardEntry) string {
 	if len(entries) == 0 {
 		return "No entries yet"
 	}
@@ -216,7 +229,7 @@ func renderLeaderboard(entries []LeaderboardEntry) string {
 	return b.String()
 }
 
-func renderBracket(matches []MatchResult) string {
+func renderBracket(matches []storage.MatchResult) string {
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Bold(true).Render("⚔️  Tournament Bracket") + "\n\n")
 
@@ -225,7 +238,7 @@ func renderBracket(matches []MatchResult) string {
 	}
 
 	// Group matches by matchup pairs
-	matchups := make(map[string]MatchResult)
+	matchups := make(map[string]storage.MatchResult)
 	for _, match := range matches {
 		// Create a consistent key regardless of order
 		key := match.Player1Username + " vs " + match.Player2Username

@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"fmt"
@@ -12,34 +12,37 @@ import (
 	"github.com/charmbracelet/ssh"
 	"github.com/charmbracelet/wish"
 	"github.com/pkg/sftp"
+	
+	"battleship-arena/internal/storage"
 )
 
-func sftpHandler(s ssh.Session) {
-	userDir := filepath.Join(uploadDir, s.User())
-	
-	// Create user directory if it doesn't exist
-	if err := os.MkdirAll(userDir, 0755); err != nil {
-		log.Printf("Failed to create user directory: %v", err)
-		return
-	}
-	
-	handler := &sftpFileHandler{
-		baseDir:  userDir,
-		username: s.User(),
-	}
-	
-	server := sftp.NewRequestServer(s, sftp.Handlers{
-		FileGet:  handler,
-		FilePut:  handler,
-		FileCmd:  handler,
-		FileList: handler,
-	})
-	
-	if err := server.Serve(); err == io.EOF {
-		server.Close()
-	} else if err != nil {
-		log.Printf("sftp server error: %v", err)
-		wish.Fatalln(s, err)
+func SFTPHandler(uploadDir string) func(ssh.Session) {
+	return func(s ssh.Session) {
+		userDir := filepath.Join(uploadDir, s.User())
+		
+		if err := os.MkdirAll(userDir, 0755); err != nil {
+			log.Printf("Failed to create user directory: %v", err)
+			return
+		}
+		
+		handler := &sftpFileHandler{
+			baseDir:  userDir,
+			username: s.User(),
+		}
+		
+		server := sftp.NewRequestServer(s, sftp.Handlers{
+			FileGet:  handler,
+			FilePut:  handler,
+			FileCmd:  handler,
+			FileList: handler,
+		})
+		
+		if err := server.Serve(); err == io.EOF {
+			server.Close()
+		} else if err != nil {
+			log.Printf("sftp server error: %v", err)
+			wish.Fatalln(s, err)
+		}
 	}
 }
 
@@ -165,7 +168,7 @@ func (f *fileWriterAt) Close() error {
 		log.Printf("SFTP: Uploaded %s from %s", f.filename, f.username)
 		
 		// Add submission and trigger testing
-		submissionID, err := addSubmission(f.username, f.filename)
+		submissionID, err := storage.AddSubmission(f.username, f.filename)
 		if err != nil {
 			log.Printf("Failed to add submission: %v", err)
 		} else {

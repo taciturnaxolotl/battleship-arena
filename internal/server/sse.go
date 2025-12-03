@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"encoding/json"
@@ -7,12 +7,14 @@ import (
 	"time"
 
 	"github.com/alexandrevicenzi/go-sse"
+	
+	"battleship-arena/internal/storage"
 )
 
-var sseServer *sse.Server
+var SSEServer *sse.Server
 
 type ProgressUpdate struct {
-	Type              string   `json:"type"` // "progress" or "complete"
+	Type              string   `json:"type"`
 	Player            string   `json:"player,omitempty"`
 	Opponent          string   `json:"opponent,omitempty"`
 	CurrentMatch      int      `json:"current_match,omitempty"`
@@ -22,17 +24,14 @@ type ProgressUpdate struct {
 	QueuedPlayers     []string `json:"queued_players,omitempty"`
 }
 
-func initSSE() {
-	sseServer = sse.NewServer(&sse.Options{
+func InitSSE() {
+	SSEServer = sse.NewServer(&sse.Options{
 		Logger: log.New(log.Writer(), "go-sse: ", log.Ldate|log.Ltime),
 	})
 }
 
-
-
-// NotifyLeaderboardUpdate sends updated leaderboard to all connected clients
 func NotifyLeaderboardUpdate() {
-	entries, err := getLeaderboard(50)
+	entries, err := storage.GetLeaderboard(50)
 	if err != nil {
 		log.Printf("SSE: failed to get leaderboard: %v", err)
 		return
@@ -44,21 +43,18 @@ func NotifyLeaderboardUpdate() {
 		return
 	}
 
-	sseServer.SendMessage("/events/updates", sse.SimpleMessage(string(data)))
+	SSEServer.SendMessage("/events/updates", sse.SimpleMessage(string(data)))
 }
 
-func broadcastProgress(player string, currentMatch, totalMatches int, startTime time.Time, queuedPlayers []string) {
+func BroadcastProgress(player string, currentMatch, totalMatches int, startTime time.Time, queuedPlayers []string) {
 	elapsed := time.Since(startTime)
 	avgTimePerMatch := elapsed / time.Duration(currentMatch)
 	remainingMatches := totalMatches - currentMatch
 	estimatedTimeLeft := avgTimePerMatch * time.Duration(remainingMatches)
 	
 	percentComplete := float64(currentMatch) / float64(totalMatches) * 100.0
-	
-	// Format time left
 	timeLeftStr := formatDuration(estimatedTimeLeft)
 	
-	// Filter out current player from queue (they're being shown in progress, not queue)
 	filteredQueue := make([]string, 0)
 	for _, p := range queuedPlayers {
 		if p != player {
@@ -84,7 +80,7 @@ func broadcastProgress(player string, currentMatch, totalMatches int, startTime 
 	
 	log.Printf("Broadcasting progress: %s [%d/%d] %.1f%% (queue: %d)", player, currentMatch, totalMatches, percentComplete, len(filteredQueue))
 	
-	sseServer.SendMessage("/events/updates", sse.SimpleMessage(string(data)))
+	SSEServer.SendMessage("/events/updates", sse.SimpleMessage(string(data)))
 }
 
 func formatDuration(d time.Duration) string {
@@ -103,7 +99,7 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dh", hours)
 }
 
-func broadcastProgressComplete() {
+func BroadcastProgressComplete() {
 	complete := ProgressUpdate{
 		Type: "complete",
 	}
@@ -115,5 +111,5 @@ func broadcastProgressComplete() {
 	
 	log.Printf("Broadcasting progress complete")
 	
-	sseServer.SendMessage("/events/updates", sse.SimpleMessage(string(data)))
+	SSEServer.SendMessage("/events/updates", sse.SimpleMessage(string(data)))
 }

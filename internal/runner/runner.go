@@ -1,4 +1,4 @@
-package main
+package runner
 
 import (
 	"fmt"
@@ -10,102 +10,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"battleship-arena/internal/storage"
 )
 
 const enginePath = "./battleship-engine"
 
-func getQueuedPlayerNames() []string {
-	// Get submissions that are either pending OR currently being tested
-	// This gives a complete view of the processing queue
-	rows, err := globalDB.Query(
-		"SELECT username FROM submissions WHERE (status = 'pending' OR status = 'testing') AND is_active = 1 ORDER BY upload_time",
-	)
-	if err != nil {
-		return []string{}
-	}
-	defer rows.Close()
-	
-	var names []string
-	for rows.Next() {
-		var username string
-		if err := rows.Scan(&username); err == nil {
-			names = append(names, username)
-		}
-	}
-	return names
-}
+func CompileSubmission(sub storage.Submission, uploadDir string) error {
+	storage.UpdateSubmissionStatus(sub.ID, "testing")
 
-func recordRatingSnapshot(submissionID, matchID int) {
-	var rating, rd, volatility float64
-	err := globalDB.QueryRow(
-		"SELECT glicko_rating, glicko_rd, glicko_volatility FROM submissions WHERE id = ?",
-		submissionID,
-	).Scan(&rating, &rd, &volatility)
-	
-	if err == nil {
-		recordRatingHistory(submissionID, matchID, rating, rd, volatility)
-	}
-}
-
-func processSubmissions() error {
-	submissions, err := getPendingSubmissions()
-	if err != nil {
-		return err
-	}
-
-	for _, sub := range submissions {
-		log.Printf("⚙️  Compiling %s (%s)", sub.Username, sub.Filename)
-		
-		if err := compileSubmission(sub); err != nil {
-			log.Printf("❌ Compilation failed for %s: %v", sub.Username, err)
-			updateSubmissionStatus(sub.ID, "failed")
-			continue
-		}
-		
-		log.Printf("✓ Compiled %s", sub.Username)
-		updateSubmissionStatus(sub.ID, "completed")
-		
-		// Run round-robin matches
-		runRoundRobinMatches(sub)
-	}
-
-	return nil
-}
-
-func generateHeader(filename, prefix string) string {
-	guard := strings.ToUpper(strings.Replace(filename, ".", "_", -1))
-	
-	// Capitalize first letter of prefix for function names
-	functionSuffix := strings.ToUpper(prefix[0:1]) + prefix[1:]
-	
-	return fmt.Sprintf(`#ifndef %s
-#define %s
-
-#include "memory.h"
-#include <string>
-
-void initMemory%s(ComputerMemory &memory);
-std::string smartMove%s(const ComputerMemory &memory);
-void updateMemory%s(int row, int col, int result, ComputerMemory &memory);
-
-#endif
-`, guard, guard, functionSuffix, functionSuffix, functionSuffix)
-}
-
-func parseFunctionNames(cppContent string) (string, error) {
-	// Look for the initMemory function to extract the suffix
-	re := regexp.MustCompile(`void\s+initMemory(\w+)\s*\(`)
-	matches := re.FindStringSubmatch(cppContent)
-	if len(matches) < 2 {
-		return "", fmt.Errorf("could not find initMemory function")
-	}
-	return matches[1], nil
-}
-
-func compileSubmission(sub Submission) error {
-	updateSubmissionStatus(sub.ID, "testing")
-
-	// Extract prefix from filename (memory_functions_XXXXX.cpp -> XXXXX)
 	re := regexp.MustCompile(`memory_functions_(\w+)\.cpp`)
 	matches := re.FindStringSubmatch(sub.Filename)
 	if len(matches) < 2 {
@@ -113,11 +26,9 @@ func compileSubmission(sub Submission) error {
 	}
 	prefix := matches[1]
 
-	// Create temporary build directory
 	buildDir := filepath.Join(enginePath, "build")
 	os.MkdirAll(buildDir, 0755)
 
-	// Copy submission to engine
 	srcPath := filepath.Join(uploadDir, sub.Username, sub.Filename)
 	dstPath := filepath.Join(enginePath, "src", sub.Filename)
 	
@@ -130,7 +41,6 @@ func compileSubmission(sub Submission) error {
 		return err
 	}
 
-	// Parse function names from the cpp file
 	functionSuffix, err := parseFunctionNames(string(input))
 	if err != nil {
 		return fmt.Errorf("failed to parse function names: %v", err)
@@ -138,7 +48,6 @@ func compileSubmission(sub Submission) error {
 	
 	log.Printf("Detected function suffix: %s", functionSuffix)
 
-	// Generate header file with parsed function names
 	headerFilename := fmt.Sprintf("memory_functions_%s.h", prefix)
 	headerPath := filepath.Join(enginePath, "src", headerFilename)
 	headerContent := generateHeader(headerFilename, functionSuffix)
@@ -148,7 +57,6 @@ func compileSubmission(sub Submission) error {
 
 	log.Printf("Compiling submission %d for %s", sub.ID, prefix)
 	
-	// Compile check only (no linking) to validate syntax
 	cmd := exec.Command("g++", "-std=c++11", "-c", "-O3",
 		"-I", filepath.Join(enginePath, "src"),
 		"-o", filepath.Join(buildDir, "ai_"+prefix+".o"),
@@ -162,116 +70,7 @@ func compileSubmission(sub Submission) error {
 	return nil
 }
 
-
-
-func getSubmissionByID(id int) (Submission, error) {
-	var sub Submission
-	err := globalDB.QueryRow(
-		"SELECT id, username, filename, upload_time, status FROM submissions WHERE id = ?",
-		id,
-	).Scan(&sub.ID, &sub.Username, &sub.Filename, &sub.UploadTime, &sub.Status)
-	return sub, err
-}
-
-func runRoundRobinMatches(newSub Submission) {
-	// Get all active submissions
-	activeSubmissions, err := getActiveSubmissions()
-	if err != nil {
-		log.Printf("Failed to get active submissions: %v", err)
-		return
-	}
-
-	// Filter to only opponents we haven't played yet
-	var unplayedOpponents []Submission
-	for _, opponent := range activeSubmissions {
-		if opponent.ID == newSub.ID {
-			continue
-		}
-		
-		// Check if match already exists
-		hasMatch, err := hasMatchBetween(newSub.ID, opponent.ID)
-		if err != nil {
-			log.Printf("Error checking match history: %v", err)
-			continue
-		}
-		
-		if !hasMatch {
-			unplayedOpponents = append(unplayedOpponents, opponent)
-		}
-	}
-	
-	totalMatches := len(unplayedOpponents)
-	if totalMatches <= 0 {
-		log.Printf("No new opponents for %s, all matches already played", newSub.Username)
-		return
-	}
-
-	log.Printf("Starting round-robin for %s (%d opponents)", newSub.Username, totalMatches)
-	matchNum := 0
-	startTime := time.Now()
-
-	// Run matches against unplayed opponents only
-	for _, opponent := range unplayedOpponents {
-		matchNum++
-		
-		// Get fresh queue data before each match
-		queuedPlayers := getQueuedPlayerNames()
-		
-		// Broadcast progress update
-		broadcastProgress(newSub.Username, matchNum, totalMatches, startTime, queuedPlayers)
-		
-		// Run match (1000 games total)
-		player1Wins, player2Wins, totalMoves := runHeadToHead(newSub, opponent, 1000)
-		
-		// Determine winner
-		var winnerID int
-		avgMoves := totalMoves / 1000
-		
-		if player1Wins > player2Wins {
-			winnerID = newSub.ID
-			log.Printf("[%d/%d] %s defeats %s (%d-%d, %d moves avg)", matchNum, totalMatches, newSub.Username, opponent.Username, player1Wins, player2Wins, avgMoves)
-		} else if player2Wins > player1Wins {
-			winnerID = opponent.ID
-			log.Printf("[%d/%d] %s defeats %s (%d-%d, %d moves avg)", matchNum, totalMatches, opponent.Username, newSub.Username, player2Wins, player1Wins, avgMoves)
-		} else {
-			// Tie - coin flip
-			if totalMoves%2 == 0 {
-				winnerID = newSub.ID
-			} else {
-				winnerID = opponent.ID
-			}
-			log.Printf("[%d/%d] Tie %d-%d, coin flip winner: %s", matchNum, totalMatches, player1Wins, player2Wins, 
-				map[int]string{newSub.ID: newSub.Username, opponent.ID: opponent.Username}[winnerID])
-		}
-		
-		// Store match result
-		matchID, err := addMatch(newSub.ID, opponent.ID, winnerID, player1Wins, player2Wins, avgMoves, avgMoves)
-		if err != nil {
-			log.Printf("Failed to store match result: %v", err)
-		} else {
-			// Update Glicko-2 ratings based on actual win percentages
-			if err := updateGlicko2Ratings(newSub.ID, opponent.ID, player1Wins, player2Wins); err != nil {
-				log.Printf("Glicko-2 update failed: %v", err)
-			} else {
-				// Record rating history for both players after update
-				recordRatingSnapshot(newSub.ID, int(matchID))
-				recordRatingSnapshot(opponent.ID, int(matchID))
-			}
-			
-			NotifyLeaderboardUpdate()
-		}
-	}
-	
-	// Check if queue is empty before hiding
-	queuedPlayers := getQueuedPlayerNames()
-	if len(queuedPlayers) == 0 {
-		broadcastProgressComplete()
-	}
-	
-	log.Printf("✓ Round-robin complete for %s (%d matches)", newSub.Username, totalMatches)
-}
-
-func runHeadToHead(player1, player2 Submission, numGames int) (int, int, int) {
+func RunHeadToHead(player1, player2 storage.Submission, numGames int) (int, int, int) {
 	re := regexp.MustCompile(`memory_functions_(\w+)\.cpp`)
 	matches1 := re.FindStringSubmatch(player1.Filename)
 	matches2 := re.FindStringSubmatch(player2.Filename)
@@ -283,7 +82,6 @@ func runHeadToHead(player1, player2 Submission, numGames int) (int, int, int) {
 	prefix1 := matches1[1]
 	prefix2 := matches2[1]
 	
-	// Read both cpp files to extract function suffixes
 	cpp1Path := filepath.Join(enginePath, "src", player1.Filename)
 	cpp2Path := filepath.Join(enginePath, "src", player2.Filename)
 	
@@ -312,11 +110,8 @@ func runHeadToHead(player1, player2 Submission, numGames int) (int, int, int) {
 	}
 	
 	buildDir := filepath.Join(enginePath, "build")
-	
-	// Create a combined binary with both AIs
 	combinedBinary := filepath.Join(buildDir, fmt.Sprintf("match_%s_vs_%s", prefix1, prefix2))
 	
-	// Generate main file that uses both AIs with correct function suffixes
 	mainContent := generateMatchMain(prefix1, prefix2, suffix1, suffix2)
 	mainPath := filepath.Join(enginePath, "src", fmt.Sprintf("match_%s_vs_%s.cpp", prefix1, prefix2))
 	if err := os.WriteFile(mainPath, []byte(mainContent), 0644); err != nil {
@@ -324,19 +119,15 @@ func runHeadToHead(player1, player2 Submission, numGames int) (int, int, int) {
 		return 0, 0, 0
 	}
 	
-	// Compile combined binary
 	compileArgs := []string{"-std=c++11", "-O3",
 		"-o", combinedBinary,
 		mainPath,
 		filepath.Join(enginePath, "src", "battleship_light.cpp"),
 	}
 	
-	// Add player files (avoid duplicates if same AI)
 	if prefix1 == prefix2 {
-		// Same AI - only compile once
 		compileArgs = append(compileArgs, filepath.Join(enginePath, "src", fmt.Sprintf("memory_functions_%s.cpp", prefix1)))
 	} else {
-		// Different AIs
 		compileArgs = append(compileArgs,
 			filepath.Join(enginePath, "src", fmt.Sprintf("memory_functions_%s.cpp", prefix1)),
 			filepath.Join(enginePath, "src", fmt.Sprintf("memory_functions_%s.cpp", prefix2)),
@@ -350,7 +141,6 @@ func runHeadToHead(player1, player2 Submission, numGames int) (int, int, int) {
 		return 0, 0, 0
 	}
 	
-	// Run the match
 	cmd = exec.Command(combinedBinary, strconv.Itoa(numGames))
 	output, err = cmd.CombinedOutput()
 	if err != nil {
@@ -358,8 +148,123 @@ func runHeadToHead(player1, player2 Submission, numGames int) (int, int, int) {
 		return 0, 0, 0
 	}
 	
-	// Parse results
 	return parseMatchOutput(string(output))
+}
+
+func RunRoundRobinMatches(newSub storage.Submission, broadcastFunc func(string, int, int, time.Time, []string)) {
+	activeSubmissions, err := storage.GetActiveSubmissions()
+	if err != nil {
+		log.Printf("Failed to get active submissions: %v", err)
+		return
+	}
+
+	var unplayedOpponents []storage.Submission
+	for _, opponent := range activeSubmissions {
+		if opponent.ID == newSub.ID {
+			continue
+		}
+		
+		hasMatch, err := storage.HasMatchBetween(newSub.ID, opponent.ID)
+		if err != nil {
+			log.Printf("Error checking match history: %v", err)
+			continue
+		}
+		
+		if !hasMatch {
+			unplayedOpponents = append(unplayedOpponents, opponent)
+		}
+	}
+	
+	totalMatches := len(unplayedOpponents)
+	if totalMatches <= 0 {
+		log.Printf("No new opponents for %s, all matches already played", newSub.Username)
+		return
+	}
+
+	log.Printf("Starting round-robin for %s (%d opponents)", newSub.Username, totalMatches)
+	matchNum := 0
+	startTime := time.Now()
+
+	for _, opponent := range unplayedOpponents {
+		matchNum++
+		
+		queuedPlayers := storage.GetQueuedPlayerNames()
+		broadcastFunc(newSub.Username, matchNum, totalMatches, startTime, queuedPlayers)
+		
+		player1Wins, player2Wins, totalMoves := RunHeadToHead(newSub, opponent, 1000)
+		
+		var winnerID int
+		avgMoves := totalMoves / 1000
+		
+		if player1Wins > player2Wins {
+			winnerID = newSub.ID
+			log.Printf("[%d/%d] %s defeats %s (%d-%d, %d moves avg)", matchNum, totalMatches, newSub.Username, opponent.Username, player1Wins, player2Wins, avgMoves)
+		} else if player2Wins > player1Wins {
+			winnerID = opponent.ID
+			log.Printf("[%d/%d] %s defeats %s (%d-%d, %d moves avg)", matchNum, totalMatches, opponent.Username, newSub.Username, player2Wins, player1Wins, avgMoves)
+		} else {
+			if totalMoves%2 == 0 {
+				winnerID = newSub.ID
+			} else {
+				winnerID = opponent.ID
+			}
+			log.Printf("[%d/%d] Tie %d-%d, coin flip winner: %s", matchNum, totalMatches, player1Wins, player2Wins, 
+				map[int]string{newSub.ID: newSub.Username, opponent.ID: opponent.Username}[winnerID])
+		}
+		
+		matchID, err := storage.AddMatch(newSub.ID, opponent.ID, winnerID, player1Wins, player2Wins, avgMoves, avgMoves)
+		if err != nil {
+			log.Printf("Failed to store match result: %v", err)
+		} else {
+			if err := storage.UpdateGlicko2Ratings(newSub.ID, opponent.ID, player1Wins, player2Wins); err != nil {
+				log.Printf("Glicko-2 update failed: %v", err)
+			} else {
+				recordRatingSnapshot(newSub.ID, int(matchID))
+				recordRatingSnapshot(opponent.ID, int(matchID))
+			}
+		}
+	}
+	
+	log.Printf("✓ Round-robin complete for %s (%d matches)", newSub.Username, totalMatches)
+}
+
+func recordRatingSnapshot(submissionID, matchID int) {
+	var rating, rd, volatility float64
+	err := storage.DB.QueryRow(
+		"SELECT glicko_rating, glicko_rd, glicko_volatility FROM submissions WHERE id = ?",
+		submissionID,
+	).Scan(&rating, &rd, &volatility)
+	
+	if err == nil {
+		storage.RecordRatingHistory(submissionID, matchID, rating, rd, volatility)
+	}
+}
+
+func parseFunctionNames(cppContent string) (string, error) {
+	re := regexp.MustCompile(`void\s+initMemory(\w+)\s*\(`)
+	matches := re.FindStringSubmatch(cppContent)
+	if len(matches) < 2 {
+		return "", fmt.Errorf("could not find initMemory function")
+	}
+	return matches[1], nil
+}
+
+func generateHeader(filename, prefix string) string {
+	guard := strings.ToUpper(strings.Replace(filename, ".", "_", -1))
+	functionSuffix := strings.ToUpper(prefix[0:1]) + prefix[1:]
+	
+	return fmt.Sprintf(`#ifndef %s
+#define %s
+
+#include "memory.h"
+#include <string>
+
+void initMemory%s(ComputerMemory &memory);
+std::string smartMove%s(const ComputerMemory &memory);
+void updateMemory%s(int row, int col, int result, ComputerMemory &memory);
+
+#endif
+`, guard, guard, functionSuffix, functionSuffix, functionSuffix)
 }
 
 func generateMatchMain(prefix1, prefix2, suffix1, suffix2 string) string {
@@ -400,7 +305,6 @@ MatchResult runMatch(int numGames) {
         while (true) {
             moveCount++;
             
-            // Player 1 move
             string move1 = smartMove%s(memory1);
             int row1, col1;
             int check1 = checkMove(move1, board2, row1, col1);
@@ -409,7 +313,6 @@ MatchResult runMatch(int numGames) {
                 check1 = checkMove(move1, board2, row1, col1);
             }
             
-            // Player 2 move
             string move2 = smartMove%s(memory2);
             int row2, col2;
             int check2 = checkMove(move2, board1, row2, col2);
@@ -418,7 +321,6 @@ MatchResult runMatch(int numGames) {
                 check2 = checkMove(move2, board1, row2, col2);
             }
             
-            // Execute moves
             int result1 = playMove(row1, col1, board2);
             int result2 = playMove(row2, col2, board1);
             
@@ -460,7 +362,6 @@ int main(int argc, char* argv[]) {
     
     MatchResult result = runMatch(numGames);
     
-    // Output in parseable format
     cout << "PLAYER1_WINS=" << result.player1Wins << endl;
     cout << "PLAYER2_WINS=" << result.player2Wins << endl;
     cout << "TIES=" << result.ties << endl;
