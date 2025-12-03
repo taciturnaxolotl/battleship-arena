@@ -207,9 +207,9 @@ func runRoundRobinMatches(newSub Submission) {
 		if err := addMatch(newSub.ID, opponent.ID, winnerID, player1Wins, player2Wins, avgMoves, avgMoves); err != nil {
 			log.Printf("Failed to store match result: %v", err)
 		} else {
-			// Update ELO ratings based on actual win percentages
-			if err := updateEloRatings(newSub.ID, opponent.ID, player1Wins, player2Wins); err != nil {
-				log.Printf("ELO update failed: %v", err)
+			// Update Glicko-2 ratings based on actual win percentages
+			if err := updateGlicko2Ratings(newSub.ID, opponent.ID, player1Wins, player2Wins); err != nil {
+				log.Printf("Glicko-2 update failed: %v", err)
 			}
 			
 			NotifyLeaderboardUpdate()

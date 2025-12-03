@@ -15,7 +15,8 @@ type LeaderboardEntry struct {
 	Wins       int
 	Losses     int
 	WinPct     float64
-	Elo        int
+	Rating     int     // Glicko-2 rating
+	RD         int     // Rating Deviation (uncertainty)
 	AvgMoves   float64
 	Stage      string
 	LastPlayed time.Time
@@ -68,7 +69,9 @@ func initDB(path string) (*sql.DB, error) {
 		upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		status TEXT DEFAULT 'pending',
 		is_active BOOLEAN DEFAULT 1,
-		elo_rating INTEGER DEFAULT 1500
+		glicko_rating REAL DEFAULT 1500.0,
+		glicko_rd REAL DEFAULT 350.0,
+		glicko_volatility REAL DEFAULT 0.06
 	);
 
 	CREATE TABLE IF NOT EXISTS tournaments (
@@ -136,7 +139,8 @@ func getLeaderboard(limit int) ([]LeaderboardEntry, error) {
 	query := `
 	SELECT 
 		s.username,
-		s.elo_rating,
+		s.glicko_rating,
+		s.glicko_rd,
 		SUM(CASE WHEN m.player1_id = s.id THEN m.player1_wins WHEN m.player2_id = s.id THEN m.player2_wins ELSE 0 END) as total_wins,
 		SUM(CASE WHEN m.player1_id = s.id THEN m.player2_wins WHEN m.player2_id = s.id THEN m.player1_wins ELSE 0 END) as total_losses,
 		AVG(CASE WHEN m.player1_id = s.id THEN m.player1_moves ELSE m.player2_moves END) as avg_moves,
@@ -144,9 +148,9 @@ func getLeaderboard(limit int) ([]LeaderboardEntry, error) {
 	FROM submissions s
 	LEFT JOIN matches m ON (m.player1_id = s.id OR m.player2_id = s.id) AND m.is_valid = 1
 	WHERE s.is_active = 1
-	GROUP BY s.username, s.elo_rating
+	GROUP BY s.username, s.glicko_rating, s.glicko_rd
 	HAVING COUNT(m.id) > 0
-	ORDER BY s.elo_rating DESC, total_wins DESC
+	ORDER BY s.glicko_rating DESC, total_wins DESC
 	LIMIT ?
 	`
 
@@ -160,10 +164,14 @@ func getLeaderboard(limit int) ([]LeaderboardEntry, error) {
 	for rows.Next() {
 		var e LeaderboardEntry
 		var lastPlayed string
-		err := rows.Scan(&e.Username, &e.Elo, &e.Wins, &e.Losses, &e.AvgMoves, &lastPlayed)
+		var rating, rd float64
+		err := rows.Scan(&e.Username, &rating, &rd, &e.Wins, &e.Losses, &e.AvgMoves, &lastPlayed)
 		if err != nil {
 			return nil, err
 		}
+		
+		e.Rating = int(rating)
+		e.RD = int(rd)
 		
 		// Calculate win percentage
 		totalGames := e.Wins + e.Losses
@@ -292,68 +300,191 @@ func getUserSubmissions(username string) ([]Submission, error) {
 	return submissions, rows.Err()
 }
 
-func calculateEloChange(player1Rating, player2Rating, player1TotalGames, player2TotalGames int, player1Score float64) (int, int) {
-	// K-factor: higher for fewer games (more volatile), lower for experienced players
-	kPlayer1 := 32
-	kPlayer2 := 32
-	
-	if player1TotalGames > 500 {
-		kPlayer1 = 16
-	}
-	if player2TotalGames > 500 {
-		kPlayer2 = 16
-	}
-	
-	// Expected scores
-	expectedPlayer1 := 1.0 / (1.0 + math.Pow(10, float64(player2Rating-player1Rating)/400.0))
-	expectedPlayer2 := 1.0 / (1.0 + math.Pow(10, float64(player1Rating-player2Rating)/400.0))
-	
-	// Actual scores (player1Score is win percentage, player2Score is 1-player1Score)
-	player2Score := 1.0 - player1Score
-	
-	// Rating changes based on difference between actual and expected
-	player1Change := int(float64(kPlayer1) * (player1Score - expectedPlayer1))
-	player2Change := int(float64(kPlayer2) * (player2Score - expectedPlayer2))
-	
-	return player1Change, player2Change
+// Glicko-2 rating system implementation
+// Based on Mark Glickman's paper: http://www.glicko.net/glicko/glicko2.pdf
+
+const (
+	glickoTau        = 0.5    // System constant (volatility change constraint)
+	glickoEpsilon    = 0.000001 // Convergence tolerance
+	glicko2Scale     = 173.7178 // Conversion factor: rating / 173.7178
+)
+
+type Glicko2Player struct {
+	Rating     float64 // μ in Glicko-2 scale
+	RD         float64 // φ in Glicko-2 scale  
+	Volatility float64 // σ
 }
 
-func updateEloRatings(player1ID, player2ID, player1Wins, player2Wins int) error {
-	// Get current ratings and match counts
-	var player1Rating, player2Rating, player1Games, player2Games int
+type Glicko2Result struct {
+	OpponentRating float64
+	OpponentRD     float64
+	Score          float64 // 0.0 to 1.0
+}
+
+// Convert rating from standard scale to Glicko-2 scale
+func toGlicko2Scale(rating, rd float64) (float64, float64) {
+	return (rating - 1500.0) / glicko2Scale, rd / glicko2Scale
+}
+
+// Convert rating from Glicko-2 scale to standard scale
+func fromGlicko2Scale(mu, phi float64) (float64, float64) {
+	return mu*glicko2Scale + 1500.0, phi * glicko2Scale
+}
+
+func g(phi float64) float64 {
+	return 1.0 / math.Sqrt(1.0+3.0*phi*phi/(math.Pi*math.Pi))
+}
+
+func eFunc(mu, muJ, phiJ float64) float64 {
+	return 1.0 / (1.0 + math.Exp(-g(phiJ)*(mu-muJ)))
+}
+
+func updateGlicko2(player Glicko2Player, results []Glicko2Result) Glicko2Player {
+	// Step 2: Convert to Glicko-2 scale
+	mu, phi := toGlicko2Scale(player.Rating, player.RD)
+	sigma := player.Volatility
 	
-	err := globalDB.QueryRow(`
-		SELECT s.elo_rating, 
-		       (SELECT COUNT(*) FROM matches m WHERE (m.player1_id = s.id OR m.player2_id = s.id) AND m.is_valid = 1)
-		FROM submissions s WHERE s.id = ?
-	`, player1ID).Scan(&player1Rating, &player1Games)
+	if len(results) == 0 {
+		// No games played - increase RD due to inactivity
+		phiStar := math.Sqrt(phi*phi + sigma*sigma)
+		rating, rd := fromGlicko2Scale(mu, phiStar)
+		return Glicko2Player{Rating: rating, RD: rd, Volatility: sigma}
+	}
+	
+	// Step 3: Compute v (variance)
+	var vInv float64
+	for _, result := range results {
+		muJ, phiJ := toGlicko2Scale(result.OpponentRating, result.OpponentRD)
+		gPhiJ := g(phiJ)
+		eVal := eFunc(mu, muJ, phiJ)
+		vInv += gPhiJ * gPhiJ * eVal * (1.0 - eVal)
+	}
+	v := 1.0 / vInv
+	
+	// Step 4: Compute delta (improvement)
+	var delta float64
+	for _, result := range results {
+		muJ, phiJ := toGlicko2Scale(result.OpponentRating, result.OpponentRD)
+		gPhiJ := g(phiJ)
+		eVal := eFunc(mu, muJ, phiJ)
+		delta += gPhiJ * (result.Score - eVal)
+	}
+	delta *= v
+	
+	// Step 5: Determine new volatility using Illinois algorithm
+	a := math.Log(sigma * sigma)
+	
+	deltaSquared := delta * delta
+	phiSquared := phi * phi
+	
+	fFunc := func(x float64) float64 {
+		eX := math.Exp(x)
+		num := eX * (deltaSquared - phiSquared - v - eX)
+		denom := 2.0 * (phiSquared + v + eX) * (phiSquared + v + eX)
+		return num/denom - (x-a)/(glickoTau*glickoTau)
+	}
+	
+	// Find bounds
+	A := a
+	var B float64
+	if deltaSquared > phiSquared+v {
+		B = math.Log(deltaSquared - phiSquared - v)
+	} else {
+		k := 1.0
+		for fFunc(a-k*glickoTau) < 0 {
+			k++
+		}
+		B = a - k*glickoTau
+	}
+	
+	// Illinois algorithm iteration
+	fA := fFunc(A)
+	fB := fFunc(B)
+	
+	for math.Abs(B-A) > glickoEpsilon {
+		C := A + (A-B)*fA/(fB-fA)
+		fC := fFunc(C)
+		
+		if fC*fB < 0 {
+			A = B
+			fA = fB
+		} else {
+			fA = fA / 2.0
+		}
+		
+		B = C
+		fB = fC
+	}
+	
+	sigmaNew := math.Exp(A / 2.0)
+	
+	// Step 6: Update rating deviation
+	phiStar := math.Sqrt(phiSquared + sigmaNew*sigmaNew)
+	
+	// Step 7: Update rating and RD
+	phiNew := 1.0 / math.Sqrt(1.0/(phiStar*phiStar)+1.0/v)
+	
+	var muNew float64
+	for _, result := range results {
+		muJ, phiJ := toGlicko2Scale(result.OpponentRating, result.OpponentRD)
+		muNew += g(phiJ) * (result.Score - eFunc(mu, muJ, phiJ))
+	}
+	muNew = mu + phiNew*phiNew*muNew
+	
+	// Step 8: Convert back to standard scale
+	rating, rd := fromGlicko2Scale(muNew, phiNew)
+	
+	return Glicko2Player{Rating: rating, RD: rd, Volatility: sigmaNew}
+}
+
+func updateGlicko2Ratings(player1ID, player2ID, player1Wins, player2Wins int) error {
+	// Get current Glicko-2 values for both players
+	var p1Rating, p1RD, p1Vol, p2Rating, p2RD, p2Vol float64
+	
+	err := globalDB.QueryRow(
+		"SELECT glicko_rating, glicko_rd, glicko_volatility FROM submissions WHERE id = ?",
+		player1ID,
+	).Scan(&p1Rating, &p1RD, &p1Vol)
 	if err != nil {
 		return err
 	}
 	
-	err = globalDB.QueryRow(`
-		SELECT s.elo_rating,
-		       (SELECT COUNT(*) FROM matches m WHERE (m.player1_id = s.id OR m.player2_id = s.id) AND m.is_valid = 1)
-		FROM submissions s WHERE s.id = ?
-	`, player2ID).Scan(&player2Rating, &player2Games)
+	err = globalDB.QueryRow(
+		"SELECT glicko_rating, glicko_rd, glicko_volatility FROM submissions WHERE id = ?",
+		player2ID,
+	).Scan(&p2Rating, &p2RD, &p2Vol)
 	if err != nil {
 		return err
 	}
 	
-	// Calculate player1's actual score (win percentage)
+	// Calculate scores
 	totalGames := player1Wins + player2Wins
 	player1Score := float64(player1Wins) / float64(totalGames)
+	player2Score := float64(player2Wins) / float64(totalGames)
 	
-	// Calculate rating changes based on actual performance
-	player1Change, player2Change := calculateEloChange(player1Rating, player2Rating, player1Games, player2Games, player1Score)
+	// Update player 1
+	p1 := Glicko2Player{Rating: p1Rating, RD: p1RD, Volatility: p1Vol}
+	p1Results := []Glicko2Result{{OpponentRating: p2Rating, OpponentRD: p2RD, Score: player1Score}}
+	p1New := updateGlicko2(p1, p1Results)
 	
-	// Update ratings
-	_, err = globalDB.Exec("UPDATE submissions SET elo_rating = ? WHERE id = ?", player1Rating+player1Change, player1ID)
+	// Update player 2
+	p2 := Glicko2Player{Rating: p2Rating, RD: p2RD, Volatility: p2Vol}
+	p2Results := []Glicko2Result{{OpponentRating: p1Rating, OpponentRD: p1RD, Score: player2Score}}
+	p2New := updateGlicko2(p2, p2Results)
+	
+	// Save updated ratings
+	_, err = globalDB.Exec(
+		"UPDATE submissions SET glicko_rating = ?, glicko_rd = ?, glicko_volatility = ? WHERE id = ?",
+		p1New.Rating, p1New.RD, p1New.Volatility, player1ID,
+	)
 	if err != nil {
 		return err
 	}
 	
-	_, err = globalDB.Exec("UPDATE submissions SET elo_rating = ? WHERE id = ?", player2Rating+player2Change, player2ID)
+	_, err = globalDB.Exec(
+		"UPDATE submissions SET glicko_rating = ?, glicko_rd = ?, glicko_volatility = ? WHERE id = ?",
+		p2New.Rating, p2New.RD, p2New.Volatility, player2ID,
+	)
 	return err
 }
 

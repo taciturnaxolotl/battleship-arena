@@ -189,8 +189,8 @@ func renderLeaderboard(entries []LeaderboardEntry) string {
 	b.WriteString(lipgloss.NewStyle().Bold(true).Render("🏆 Leaderboard") + "\n\n")
 
 	// Header without styling on the whole line
-	b.WriteString(fmt.Sprintf("%-4s %-20s %6s %8s %8s %10s %10s\n", 
-		"Rank", "User", "ELO", "Wins", "Losses", "Win Rate", "Avg Moves"))
+	b.WriteString(fmt.Sprintf("%-4s %-20s %11s %8s %8s %10s %10s\n", 
+		"Rank", "User", "Rating", "Wins", "Losses", "Win Rate", "Avg Moves"))
 
 	for i, entry := range entries {
 		rank := fmt.Sprintf("#%d", i+1)
@@ -207,9 +207,10 @@ func renderLeaderboard(entries []LeaderboardEntry) string {
 			coloredRank = rank
 		}
 		
-		// Format line with proper spacing
-		b.WriteString(fmt.Sprintf("%-4s %-20s %6d %8d %8d %9.2f%% %9.1f\n",
-			coloredRank, entry.Username, entry.Elo, entry.Wins, entry.Losses, entry.WinPct, entry.AvgMoves))
+		// Format line with Glicko-2 rating ± RD
+		ratingStr := fmt.Sprintf("%d±%d", entry.Rating, entry.RD)
+		b.WriteString(fmt.Sprintf("%-4s %-20s %11s %8d %8d %9.2f%% %9.1f\n",
+			coloredRank, entry.Username, ratingStr, entry.Wins, entry.Losses, entry.WinPct, entry.AvgMoves))
 	}
 
 	return b.String()

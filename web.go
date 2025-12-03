@@ -313,7 +313,7 @@ const leaderboardHTML = `
                 return '<tr>' +
                     '<td class="rank rank-' + rank + '">' + medal + '</td>' +
                     '<td class="player-name">' + e.Username + '</td>' +
-                    '<td><strong>' + e.Elo + '</strong></td>' +
+                    '<td><strong>' + e.Rating + '</strong> <span style="color: #94a3b8; font-size: 0.85em;">±' + e.RD + '</span></td>' +
                     '<td>' + e.Wins.toLocaleString() + '</td>' +
                     '<td>' + e.Losses.toLocaleString() + '</td>' +
                     '<td><span class="win-rate ' + winRateClass + '">' + winRate + '%</span></td>' +
@@ -366,7 +366,7 @@ const leaderboardHTML = `
                     <tr>
                         <th>Rank</th>
                         <th>Player</th>
-                        <th>ELO</th>
+                        <th>Rating</th>
                         <th>Wins</th>
                         <th>Losses</th>
                         <th>Win Rate</th>
@@ -380,7 +380,7 @@ const leaderboardHTML = `
                     <tr>
                         <td class="rank rank-{{add $i 1}}">{{if lt $i 3}}{{medal $i}}{{else}}{{add $i 1}}{{end}}</td>
                         <td class="player-name">{{$e.Username}}</td>
-                        <td><strong>{{$e.Elo}}</strong></td>
+                        <td><strong>{{$e.Rating}}</strong> <span style="color: #94a3b8; font-size: 0.85em;">±{{$e.RD}}</span></td>
                         <td>{{$e.Wins}}</td>
                         <td>{{$e.Losses}}</td>
                         <td><span class="win-rate {{winRateClass $e}}">{{winRate $e}}%</span></td>
