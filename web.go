@@ -256,6 +256,117 @@ const leaderboardHTML = `
             margin-bottom: 1rem;
         }
         
+        .progress-indicator {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: #1e293b;
+            border: 2px solid #3b82f6;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            min-width: 300px;
+            z-index: 1000;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        .progress-indicator.hidden {
+            display: none;
+        }
+        
+        .progress-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        
+        .progress-spinner {
+            width: 20px;
+            height: 20px;
+            border: 3px solid #334155;
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 0.75rem;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .progress-title {
+            font-weight: 600;
+            color: #e2e8f0;
+            font-size: 1rem;
+        }
+        
+        .progress-player {
+            color: #3b82f6;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        
+        .progress-stats {
+            font-size: 0.875rem;
+            color: #94a3b8;
+            margin-bottom: 0.75rem;
+        }
+        
+        .progress-bar-container {
+            background: #0f172a;
+            border-radius: 4px;
+            height: 8px;
+            overflow: hidden;
+            margin-bottom: 0.5rem;
+        }
+        
+        .progress-bar {
+            background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+            height: 100%;
+            transition: width 0.5s ease;
+            border-radius: 4px;
+        }
+        
+        .progress-time {
+            font-size: 0.75rem;
+            color: #64748b;
+            text-align: right;
+        }
+        
+        .progress-queue {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid #334155;
+        }
+        
+        .progress-queue-title {
+            font-size: 0.75rem;
+            color: #64748b;
+            margin-bottom: 0.5rem;
+        }
+        
+        .progress-queue-list {
+            font-size: 0.875rem;
+            color: #94a3b8;
+            max-height: 100px;
+            overflow-y: auto;
+        }
+        
+        .progress-queue-item {
+            padding: 0.25rem 0;
+        }
+        
         @media (max-width: 768px) {
             h1 { font-size: 2rem; }
             .subtitle { font-size: 1rem; }
@@ -277,9 +388,21 @@ const leaderboardHTML = `
             
             eventSource.onmessage = (event) => {
                 try {
-                    const entries = JSON.parse(event.data);
-                    console.log('Updating leaderboard with', entries.length, 'entries');
-                    updateLeaderboard(entries);
+                    const data = JSON.parse(event.data);
+                    console.log('SSE message received:', data);
+                    
+                    // Check if it's a progress update or leaderboard update
+                    if (data.type === 'progress') {
+                        console.log('Progress update:', data);
+                        updateProgress(data);
+                    } else if (data.type === 'complete') {
+                        console.log('Progress complete');
+                        hideProgress();
+                    } else if (Array.isArray(data)) {
+                        // Leaderboard update
+                        console.log('Updating leaderboard with', data.length, 'entries');
+                        updateLeaderboard(data);
+                    }
                 } catch (error) {
                     console.error('Failed to parse SSE data:', error);
                 }
@@ -332,6 +455,46 @@ const leaderboardHTML = `
             statValues[0].textContent = entries.length;
             const totalGames = entries.reduce((sum, e) => sum + e.Wins + e.Losses, 0);
             statValues[1].textContent = totalGames.toLocaleString();
+        }
+        
+        function updateProgress(data) {
+            const indicator = document.getElementById('progress-indicator');
+            
+            if (!indicator) {
+                console.error('Progress indicator element not found!');
+                return;
+            }
+            
+            console.log('Updating progress indicator:', data);
+            
+            // Show indicator
+            indicator.classList.remove('hidden');
+            
+            // Update content
+            document.getElementById('progress-player').textContent = data.player;
+            document.getElementById('progress-current').textContent = data.current_match;
+            document.getElementById('progress-total').textContent = data.total_matches;
+            document.getElementById('progress-time').textContent = data.estimated_time_left;
+            document.getElementById('progress-bar').style.width = data.percent_complete + '%';
+            
+            // Update queue
+            const queueContainer = document.getElementById('progress-queue-container');
+            if (data.queued_players && data.queued_players.length > 0) {
+                queueContainer.style.display = 'block';
+                const queueList = document.getElementById('progress-queue-list');
+                queueList.innerHTML = data.queued_players.map(p => 
+                    '<div class="progress-queue-item">⏳ ' + p + '</div>'
+                ).join('');
+            } else {
+                queueContainer.style.display = 'none';
+            }
+        }
+        
+        function hideProgress() {
+            const indicator = document.getElementById('progress-indicator');
+            if (indicator) {
+                indicator.classList.add('hidden');
+            }
         }
         
         window.addEventListener('DOMContentLoaded', () => {
@@ -412,6 +575,28 @@ const leaderboardHTML = `
             <p>Connect via SSH to submit your battleship AI:</p>
             <p><code>ssh -p 2222 username@localhost</code></p>
             <p style="margin-top: 1rem;">Upload your <code>memory_functions_*.cpp</code> file and compete in the arena!</p>
+        </div>
+    </div>
+    
+    <!-- Progress Indicator -->
+    <div id="progress-indicator" class="progress-indicator hidden">
+        <div class="progress-header">
+            <div class="progress-spinner"></div>
+            <div class="progress-title">Computing Ratings</div>
+        </div>
+        <div class="progress-player" id="progress-player">-</div>
+        <div class="progress-stats">
+            Match <span id="progress-current">0</span> of <span id="progress-total">0</span>
+        </div>
+        <div class="progress-bar-container">
+            <div class="progress-bar" id="progress-bar" style="width: 0%"></div>
+        </div>
+        <div class="progress-time">
+            Est. <span id="progress-time">-</span> remaining
+        </div>
+        <div id="progress-queue-container" class="progress-queue" style="display: none;">
+            <div class="progress-queue-title">Queued Players:</div>
+            <div id="progress-queue-list" class="progress-queue-list"></div>
         </div>
     </div>
 </body>

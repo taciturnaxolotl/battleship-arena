@@ -9,9 +9,31 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const enginePath = "./battleship-engine"
+
+func getQueuedPlayerNames() []string {
+	// Get submissions that are either pending OR currently being tested
+	// This gives a complete view of the processing queue
+	rows, err := globalDB.Query(
+		"SELECT username FROM submissions WHERE (status = 'pending' OR status = 'testing') AND is_active = 1 ORDER BY upload_time",
+	)
+	if err != nil {
+		return []string{}
+	}
+	defer rows.Close()
+	
+	var names []string
+	for rows.Next() {
+		var username string
+		if err := rows.Scan(&username); err == nil {
+			names = append(names, username)
+		}
+	}
+	return names
+}
 
 func recordRatingSnapshot(submissionID, matchID int) {
 	var rating, rd, volatility float64
@@ -186,10 +208,17 @@ func runRoundRobinMatches(newSub Submission) {
 
 	log.Printf("Starting round-robin for %s (%d opponents)", newSub.Username, totalMatches)
 	matchNum := 0
+	startTime := time.Now()
 
 	// Run matches against unplayed opponents only
 	for _, opponent := range unplayedOpponents {
 		matchNum++
+		
+		// Get fresh queue data before each match
+		queuedPlayers := getQueuedPlayerNames()
+		
+		// Broadcast progress update
+		broadcastProgress(newSub.Username, matchNum, totalMatches, startTime, queuedPlayers)
 		
 		// Run match (1000 games total)
 		player1Wins, player2Wins, totalMoves := runHeadToHead(newSub, opponent, 1000)
@@ -231,6 +260,12 @@ func runRoundRobinMatches(newSub Submission) {
 			
 			NotifyLeaderboardUpdate()
 		}
+	}
+	
+	// Check if queue is empty before hiding
+	queuedPlayers := getQueuedPlayerNames()
+	if len(queuedPlayers) == 0 {
+		broadcastProgressComplete()
 	}
 	
 	log.Printf("✓ Round-robin complete for %s (%d matches)", newSub.Username, totalMatches)

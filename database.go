@@ -152,8 +152,8 @@ func getLeaderboard(limit int) ([]LeaderboardEntry, error) {
 	query := `
 	SELECT 
 		s.username,
-		s.glicko_rating,
-		s.glicko_rd,
+		COALESCE(s.glicko_rating, 1500.0) as rating,
+		COALESCE(s.glicko_rd, 350.0) as rd,
 		SUM(CASE WHEN m.player1_id = s.id THEN m.player1_wins WHEN m.player2_id = s.id THEN m.player2_wins ELSE 0 END) as total_wins,
 		SUM(CASE WHEN m.player1_id = s.id THEN m.player2_wins WHEN m.player2_id = s.id THEN m.player1_wins ELSE 0 END) as total_losses,
 		AVG(CASE WHEN m.player1_id = s.id THEN m.player1_moves ELSE m.player2_moves END) as avg_moves,
@@ -163,7 +163,7 @@ func getLeaderboard(limit int) ([]LeaderboardEntry, error) {
 	WHERE s.is_active = 1
 	GROUP BY s.username, s.glicko_rating, s.glicko_rd
 	HAVING COUNT(m.id) > 0
-	ORDER BY s.glicko_rating DESC, total_wins DESC
+	ORDER BY rating DESC, total_wins DESC
 	LIMIT ?
 	`
 
@@ -222,9 +222,9 @@ func addSubmission(username, filename string) (int64, error) {
 		return 0, err
 	}
 	
-	// Insert new submission
+	// Insert new submission with default Glicko-2 values
 	result, err := globalDB.Exec(
-		"INSERT INTO submissions (username, filename, is_active) VALUES (?, ?, 1)",
+		"INSERT INTO submissions (username, filename, is_active, glicko_rating, glicko_rd, glicko_volatility) VALUES (?, ?, 1, 1500.0, 350.0, 0.06)",
 		username, filename,
 	)
 	if err != nil {
@@ -454,11 +454,11 @@ func updateGlicko2(player Glicko2Player, results []Glicko2Result) Glicko2Player 
 }
 
 func updateGlicko2Ratings(player1ID, player2ID, player1Wins, player2Wins int) error {
-	// Get current Glicko-2 values for both players
+	// Get current Glicko-2 values for both players, with defaults for NULL
 	var p1Rating, p1RD, p1Vol, p2Rating, p2RD, p2Vol float64
 	
 	err := globalDB.QueryRow(
-		"SELECT glicko_rating, glicko_rd, glicko_volatility FROM submissions WHERE id = ?",
+		"SELECT COALESCE(glicko_rating, 1500.0), COALESCE(glicko_rd, 350.0), COALESCE(glicko_volatility, 0.06) FROM submissions WHERE id = ?",
 		player1ID,
 	).Scan(&p1Rating, &p1RD, &p1Vol)
 	if err != nil {
@@ -466,7 +466,7 @@ func updateGlicko2Ratings(player1ID, player2ID, player1Wins, player2Wins int) er
 	}
 	
 	err = globalDB.QueryRow(
-		"SELECT glicko_rating, glicko_rd, glicko_volatility FROM submissions WHERE id = ?",
+		"SELECT COALESCE(glicko_rating, 1500.0), COALESCE(glicko_rd, 350.0), COALESCE(glicko_volatility, 0.06) FROM submissions WHERE id = ?",
 		player2ID,
 	).Scan(&p2Rating, &p2RD, &p2Vol)
 	if err != nil {
