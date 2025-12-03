@@ -142,6 +142,9 @@ func teaHandler(s ssh.Session) (tea.Model, []tea.ProgramOption) {
 		return nil, nil
 	}
 	
+	// Get proper terminal options for color support
+	opts := bubbletea.MakeOptions(s)
+	
 	if needsOnboarding {
 		// Run onboarding first
 		publicKey := ""
@@ -150,11 +153,11 @@ func teaHandler(s ssh.Session) (tea.Model, []tea.ProgramOption) {
 		}
 		
 		m := tui.NewOnboardingModel(s.User(), publicKey, pty.Window.Width, pty.Window.Height)
-		return m, []tea.ProgramOption{tea.WithAltScreen()}
+		return m, opts
 	}
 
 	m := tui.InitialModel(s.User(), pty.Window.Width, pty.Window.Height)
-	return m, []tea.ProgramOption{tea.WithAltScreen()}
+	return m, opts
 }
 
 func initStorage(cfg Config) error {
