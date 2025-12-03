@@ -148,21 +148,36 @@ func runRoundRobinMatches(newSub Submission) {
 		return
 	}
 
-	totalMatches := len(activeSubmissions) - 1 // Exclude self
-	if totalMatches <= 0 {
-		log.Printf("No opponents for %s, skipping matches", newSub.Username)
-		return
-	}
-
-	log.Printf("Starting round-robin for %s against %d opponents", newSub.Username, totalMatches)
-	matchNum := 0
-
-	// Run matches against all other submissions
+	// Filter to only opponents we haven't played yet
+	var unplayedOpponents []Submission
 	for _, opponent := range activeSubmissions {
 		if opponent.ID == newSub.ID {
 			continue
 		}
 		
+		// Check if match already exists
+		hasMatch, err := hasMatchBetween(newSub.ID, opponent.ID)
+		if err != nil {
+			log.Printf("Error checking match history: %v", err)
+			continue
+		}
+		
+		if !hasMatch {
+			unplayedOpponents = append(unplayedOpponents, opponent)
+		}
+	}
+	
+	totalMatches := len(unplayedOpponents)
+	if totalMatches <= 0 {
+		log.Printf("No new opponents for %s, all matches already played", newSub.Username)
+		return
+	}
+
+	log.Printf("Starting round-robin for %s against %d new opponents", newSub.Username, totalMatches)
+	matchNum := 0
+
+	// Run matches against unplayed opponents only
+	for _, opponent := range unplayedOpponents {
 		matchNum++
 		log.Printf("[%d/%d] Running match: %s vs %s (1000 games)", matchNum, totalMatches, newSub.Username, opponent.Username)
 		
@@ -199,7 +214,7 @@ func runRoundRobinMatches(newSub Submission) {
 		}
 	}
 	
-	log.Printf("Round-robin complete for %s (%d matches)", newSub.Username, totalMatches)
+	log.Printf("Round-robin complete for %s (%d new matches)", newSub.Username, totalMatches)
 }
 
 func runHeadToHead(player1, player2 Submission, numGames int) (int, int, int) {

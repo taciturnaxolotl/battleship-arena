@@ -10,11 +10,12 @@ import (
 var globalDB *sql.DB
 
 type LeaderboardEntry struct {
-	Username  string
-	Wins      int
-	Losses    int
-	AvgMoves  float64
-	Stage     string
+	Username   string
+	Wins       int
+	Losses     int
+	WinPct     float64
+	AvgMoves   float64
+	Stage      string
 	LastPlayed time.Time
 }
 
@@ -105,6 +106,7 @@ func initDB(path string) (*sql.DB, error) {
 		player2_wins INTEGER DEFAULT 0,
 		player1_moves INTEGER,
 		player2_moves INTEGER,
+		is_valid BOOLEAN DEFAULT 1,
 		timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (player1_id) REFERENCES submissions(id),
 		FOREIGN KEY (player2_id) REFERENCES submissions(id),
@@ -116,9 +118,11 @@ func initDB(path string) (*sql.DB, error) {
 	CREATE INDEX IF NOT EXISTS idx_tournaments_status ON tournaments(status);
 	CREATE INDEX IF NOT EXISTS idx_matches_player1 ON matches(player1_id);
 	CREATE INDEX IF NOT EXISTS idx_matches_player2 ON matches(player2_id);
+	CREATE INDEX IF NOT EXISTS idx_matches_valid ON matches(is_valid);
 	CREATE INDEX IF NOT EXISTS idx_submissions_username ON submissions(username);
 	CREATE INDEX IF NOT EXISTS idx_submissions_status ON submissions(status);
 	CREATE INDEX IF NOT EXISTS idx_submissions_active ON submissions(is_active);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_unique_pair ON matches(player1_id, player2_id, is_valid) WHERE is_valid = 1;
 	`
 
 	_, err = db.Exec(schema)
@@ -134,11 +138,11 @@ func getLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		AVG(CASE WHEN m.player1_id = s.id THEN m.player1_moves ELSE m.player2_moves END) as avg_moves,
 		MAX(m.timestamp) as last_played
 	FROM submissions s
-	LEFT JOIN matches m ON (m.player1_id = s.id OR m.player2_id = s.id)
+	LEFT JOIN matches m ON (m.player1_id = s.id OR m.player2_id = s.id) AND m.is_valid = 1
 	WHERE s.is_active = 1
 	GROUP BY s.username
 	HAVING COUNT(m.id) > 0
-	ORDER BY total_wins DESC, total_losses ASC, avg_moves ASC
+	ORDER BY (CAST(total_wins AS REAL) / (total_wins + total_losses)) DESC, avg_moves ASC
 	LIMIT ?
 	`
 
@@ -157,6 +161,12 @@ func getLeaderboard(limit int) ([]LeaderboardEntry, error) {
 			return nil, err
 		}
 		
+		// Calculate win percentage
+		totalGames := e.Wins + e.Losses
+		if totalGames > 0 {
+			e.WinPct = float64(e.Wins) / float64(totalGames) * 100.0
+		}
+		
 		// Parse the timestamp string
 		e.LastPlayed, _ = time.Parse("2006-01-02 15:04:05", lastPlayed)
 		
@@ -167,8 +177,19 @@ func getLeaderboard(limit int) ([]LeaderboardEntry, error) {
 }
 
 func addSubmission(username, filename string) (int64, error) {
-	// Mark old submission as inactive
+	// Invalidate all matches involving this user's submissions
 	_, err := globalDB.Exec(
+		`UPDATE matches SET is_valid = 0 
+		 WHERE player1_id IN (SELECT id FROM submissions WHERE username = ?)
+		 OR player2_id IN (SELECT id FROM submissions WHERE username = ?)`,
+		username, username,
+	)
+	if err != nil {
+		return 0, err
+	}
+	
+	// Mark old submission as inactive
+	_, err = globalDB.Exec(
 		"UPDATE submissions SET is_active = 0 WHERE username = ?",
 		username,
 	)
@@ -267,6 +288,16 @@ func getUserSubmissions(username string) ([]Submission, error) {
 	return submissions, rows.Err()
 }
 
+func hasMatchBetween(player1ID, player2ID int) (bool, error) {
+	var count int
+	err := globalDB.QueryRow(
+		`SELECT COUNT(*) FROM matches 
+		 WHERE is_valid = 1 
+		 AND ((player1_id = ? AND player2_id = ?) OR (player1_id = ? AND player2_id = ?))`,
+		player1ID, player2ID, player2ID, player1ID,
+	).Scan(&count)
+	return count > 0, err
+}
 
 type MatchResult struct {
 	Player1Username string
@@ -286,7 +317,7 @@ func getAllMatches() ([]MatchResult, error) {
 	JOIN submissions s1 ON m.player1_id = s1.id
 	JOIN submissions s2 ON m.player2_id = s2.id
 	JOIN submissions sw ON m.winner_id = sw.id
-	WHERE s1.is_active = 1 AND s2.is_active = 1
+	WHERE s1.is_active = 1 AND s2.is_active = 1 AND m.is_valid = 1
 	ORDER BY m.timestamp DESC
 	`
 	

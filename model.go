@@ -193,12 +193,6 @@ func renderLeaderboard(entries []LeaderboardEntry) string {
 		"Rank", "User", "Wins", "Losses", "Win Rate", "Avg Moves"))
 
 	for i, entry := range entries {
-		winRate := 0.0
-		total := entry.Wins + entry.Losses
-		if total > 0 {
-			winRate = float64(entry.Wins) / float64(total) * 100
-		}
-
 		rank := fmt.Sprintf("#%d", i+1)
 		
 		// Apply color only to the rank
@@ -215,7 +209,7 @@ func renderLeaderboard(entries []LeaderboardEntry) string {
 		
 		// Format line with proper spacing
 		b.WriteString(fmt.Sprintf("%-4s %-20s %8d %8d %9.2f%% %9.1f\n",
-			coloredRank, entry.Username, entry.Wins, entry.Losses, winRate, entry.AvgMoves))
+			coloredRank, entry.Username, entry.Wins, entry.Losses, entry.WinPct, entry.AvgMoves))
 	}
 
 	return b.String()

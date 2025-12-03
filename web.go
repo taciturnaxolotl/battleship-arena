@@ -298,9 +298,8 @@ const leaderboardHTML = `
             
             tbody.innerHTML = entries.map((e, i) => {
                 const rank = i + 1;
-                const total = e.Wins + e.Losses;
-                const winRate = total === 0 ? 0 : ((e.Wins / total) * 100).toFixed(1);
-                const winRateClass = winRate >= 60 ? 'win-rate-high' : winRate >= 40 ? 'win-rate-med' : 'win-rate-low';
+                const winRate = e.WinPct.toFixed(1);
+                const winRateClass = e.WinPct >= 60 ? 'win-rate-high' : e.WinPct >= 40 ? 'win-rate-med' : 'win-rate-low';
                 const medals = ['🥇', '🥈', '🥉'];
                 const medal = medals[i] || rank;
                 const lastPlayed = new Date(e.LastPlayed).toLocaleString('en-US', { 
@@ -422,22 +421,12 @@ var tmpl = template.Must(template.New("leaderboard").Funcs(template.FuncMap{
 		return ""
 	},
 	"winRate": func(e LeaderboardEntry) string {
-		total := e.Wins + e.Losses
-		if total == 0 {
-			return "0.0"
-		}
-		rate := float64(e.Wins) / float64(total) * 100
-		return formatFloat(rate, 1)
+		return formatFloat(e.WinPct, 1)
 	},
 	"winRateClass": func(e LeaderboardEntry) string {
-		total := e.Wins + e.Losses
-		if total == 0 {
-			return "win-rate-low"
-		}
-		rate := float64(e.Wins) / float64(total) * 100
-		if rate >= 60 {
+		if e.WinPct >= 60 {
 			return "win-rate-high"
-		} else if rate >= 40 {
+		} else if e.WinPct >= 40 {
 			return "win-rate-med"
 		}
 		return "win-rate-low"
