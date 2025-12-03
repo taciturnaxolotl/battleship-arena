@@ -45,6 +45,12 @@
               "-w"
             ];
 
+            postInstall = ''
+              mkdir -p $out/share/battleship-arena/battleship-engine
+              cp -r ${self}/battleship-engine/src $out/share/battleship-arena/battleship-engine/
+              mkdir -p $out/share/battleship-arena/battleship-engine/build
+            '';
+
             meta = with pkgs.lib; {
               description = "SSH-based battleship tournament service";
               homepage = "https://github.com/taciturnaxolotl/battleship-arena";

@@ -68,7 +68,7 @@ func ProcessSubmissions(uploadDir string, broadcastFunc func(string, int, int, t
 		log.Printf("✓ Compiled %s", sub.Username)
 		storage.UpdateSubmissionStatus(sub.ID, "completed")
 		
-		RunRoundRobinMatches(sub, broadcastFunc)
+		RunRoundRobinMatches(sub, uploadDir, broadcastFunc)
 		notifyFunc()
 	}
 	

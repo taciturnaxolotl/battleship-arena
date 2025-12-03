@@ -14,7 +14,14 @@ import (
 	"battleship-arena/internal/storage"
 )
 
-const enginePath = "./battleship-engine"
+var enginePath = getEnginePath()
+
+func getEnginePath() string {
+	if path := os.Getenv("BATTLESHIP_ENGINE_PATH"); path != "" {
+		return path
+	}
+	return "./battleship-engine"
+}
 
 func CompileSubmission(sub storage.Submission, uploadDir string) error {
 	storage.UpdateSubmissionStatus(sub.ID, "testing")
@@ -85,6 +92,17 @@ func RunHeadToHead(player1, player2 storage.Submission, numGames int) (int, int,
 	cpp1Path := filepath.Join(enginePath, "src", player1.Filename)
 	cpp2Path := filepath.Join(enginePath, "src", player2.Filename)
 	
+	// Ensure both files exist in engine/src (copy from uploads if missing)
+	if _, err := os.Stat(cpp1Path); os.IsNotExist(err) {
+		log.Printf("Player1 file missing in engine/src, skipping: %s", cpp1Path)
+		return 0, 0, 0
+	}
+	
+	if _, err := os.Stat(cpp2Path); os.IsNotExist(err) {
+		log.Printf("Player2 file missing in engine/src, skipping: %s", cpp2Path)
+		return 0, 0, 0
+	}
+	
 	cpp1Content, err := os.ReadFile(cpp1Path)
 	if err != nil {
 		log.Printf("Failed to read %s: %v", cpp1Path, err)
@@ -151,7 +169,7 @@ func RunHeadToHead(player1, player2 storage.Submission, numGames int) (int, int,
 	return parseMatchOutput(string(output))
 }
 
-func RunRoundRobinMatches(newSub storage.Submission, broadcastFunc func(string, int, int, time.Time, []string)) {
+func RunRoundRobinMatches(newSub storage.Submission, uploadDir string, broadcastFunc func(string, int, int, time.Time, []string)) {
 	activeSubmissions, err := storage.GetActiveSubmissions()
 	if err != nil {
 		log.Printf("Failed to get active submissions: %v", err)
@@ -171,6 +189,37 @@ func RunRoundRobinMatches(newSub storage.Submission, broadcastFunc func(string, 
 		}
 		
 		if !hasMatch {
+			// Ensure opponent file exists in engine/src
+			opponentSrcPath := filepath.Join(uploadDir, opponent.Username, opponent.Filename)
+			opponentDstPath := filepath.Join(enginePath, "src", opponent.Filename)
+			
+			if _, err := os.Stat(opponentDstPath); os.IsNotExist(err) {
+				// Copy opponent file to engine/src
+				opponentContent, err := os.ReadFile(opponentSrcPath)
+				if err != nil {
+					log.Printf("Failed to read opponent file %s: %v", opponentSrcPath, err)
+					continue
+				}
+				if err := os.WriteFile(opponentDstPath, opponentContent, 0644); err != nil {
+					log.Printf("Failed to copy opponent file to engine: %v", err)
+					continue
+				}
+				
+				// Generate opponent header if missing
+				re := regexp.MustCompile(`memory_functions_(\w+)\.cpp`)
+				matches := re.FindStringSubmatch(opponent.Filename)
+				if len(matches) >= 2 {
+					prefix := matches[1]
+					functionSuffix, err := parseFunctionNames(string(opponentContent))
+					if err == nil {
+						headerFilename := fmt.Sprintf("memory_functions_%s.h", prefix)
+						headerPath := filepath.Join(enginePath, "src", headerFilename)
+						headerContent := generateHeader(headerFilename, functionSuffix)
+						os.WriteFile(headerPath, []byte(headerContent), 0644)
+					}
+				}
+			}
+			
 			unplayedOpponents = append(unplayedOpponents, opponent)
 		}
 	}
