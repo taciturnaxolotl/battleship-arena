@@ -20,6 +20,7 @@ type LeaderboardEntry struct {
 	AvgMoves   float64
 	Stage      string
 	LastPlayed time.Time
+	IsPending  bool
 }
 
 type Submission struct {
@@ -175,6 +176,7 @@ func InitDB(path string) (*sql.DB, error) {
 }
 
 func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
+	// Get submissions with matches
 	query := `
 	SELECT 
 		s.username,
@@ -183,13 +185,32 @@ func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		SUM(CASE WHEN m.player1_id = s.id THEN m.player1_wins WHEN m.player2_id = s.id THEN m.player2_wins ELSE 0 END) as total_wins,
 		SUM(CASE WHEN m.player1_id = s.id THEN m.player2_wins WHEN m.player2_id = s.id THEN m.player1_wins ELSE 0 END) as total_losses,
 		AVG(CASE WHEN m.player1_id = s.id THEN m.player1_moves ELSE m.player2_moves END) as avg_moves,
-		MAX(m.timestamp) as last_played
+		MAX(m.timestamp) as last_played,
+		0 as is_pending
 	FROM submissions s
 	LEFT JOIN matches m ON (m.player1_id = s.id OR m.player2_id = s.id) AND m.is_valid = 1
 	WHERE s.is_active = 1
 	GROUP BY s.username, s.glicko_rating, s.glicko_rd
 	HAVING COUNT(m.id) > 0
-	ORDER BY rating DESC, total_wins DESC
+	
+	UNION ALL
+	
+	SELECT 
+		s.username,
+		1500.0 as rating,
+		350.0 as rd,
+		0 as total_wins,
+		0 as total_losses,
+		0.0 as avg_moves,
+		s.upload_time as last_played,
+		1 as is_pending
+	FROM submissions s
+	LEFT JOIN matches m ON (m.player1_id = s.id OR m.player2_id = s.id) AND m.is_valid = 1
+	WHERE s.is_active = 1 AND s.status IN ('pending', 'testing')
+	GROUP BY s.username, s.upload_time
+	HAVING COUNT(m.id) = 0
+	
+	ORDER BY is_pending ASC, rating DESC, total_wins DESC
 	LIMIT ?
 	`
 
@@ -204,13 +225,15 @@ func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		var e LeaderboardEntry
 		var lastPlayed string
 		var rating, rd float64
-		err := rows.Scan(&e.Username, &rating, &rd, &e.Wins, &e.Losses, &e.AvgMoves, &lastPlayed)
+		var isPending int
+		err := rows.Scan(&e.Username, &rating, &rd, &e.Wins, &e.Losses, &e.AvgMoves, &lastPlayed, &isPending)
 		if err != nil {
 			return nil, err
 		}
 		
 		e.Rating = int(rating)
 		e.RD = int(rd)
+		e.IsPending = isPending == 1
 		
 		totalGames := e.Wins + e.Losses
 		if totalGames > 0 {

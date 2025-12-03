@@ -168,6 +168,19 @@ const leaderboardHTML = `
             transition: background 0.2s;
         }
         
+        tbody tr.pending {
+            opacity: 0.5;
+            color: #64748b;
+        }
+        
+        tbody tr.pending .player-name {
+            color: #64748b;
+        }
+        
+        tbody tr.pending .rank {
+            color: #64748b !important;
+        }
+        
         tbody tr:hover {
             background: rgba(59, 130, 246, 0.05);
         }
@@ -436,25 +449,41 @@ const leaderboardHTML = `
             
             tbody.innerHTML = entries.map((e, i) => {
                 const rank = i + 1;
+                const isPending = e.IsPending || false;
+                const rowClass = isPending ? ' class="pending"' : '';
+                
+                let rankDisplay;
+                if (isPending) {
+                    rankDisplay = '⏳';
+                } else {
+                    const medals = ['🥇', '🥈', '🥉'];
+                    rankDisplay = medals[i] || rank;
+                }
+                
                 const winRate = e.WinPct.toFixed(1);
                 const winRateClass = e.WinPct >= 60 ? 'win-rate-high' : e.WinPct >= 40 ? 'win-rate-med' : 'win-rate-low';
-                const medals = ['🥇', '🥈', '🥉'];
-                const medal = medals[i] || rank;
-                const lastPlayed = new Date(e.LastPlayed).toLocaleString('en-US', { 
+                const lastPlayed = isPending ? 'Waiting...' : new Date(e.LastPlayed).toLocaleString('en-US', { 
                     month: 'short', 
                     day: 'numeric',
                     hour: 'numeric',
                     minute: '2-digit'
                 });
                 
-                return '<tr>' +
-                    '<td class="rank rank-' + rank + '">' + medal + '</td>' +
-                    '<td class="player-name"><a href="/user/' + e.Username + '" style="color: inherit; text-decoration: none;">' + e.Username + '</a></td>' +
-                    '<td><strong>' + e.Rating + '</strong> <span style="color: #94a3b8; font-size: 0.85em;">±' + e.RD + '</span></td>' +
-                    '<td>' + e.Wins.toLocaleString() + '</td>' +
-                    '<td>' + e.Losses.toLocaleString() + '</td>' +
-                    '<td><span class="win-rate ' + winRateClass + '">' + winRate + '%</span></td>' +
-                    '<td>' + e.AvgMoves.toFixed(1) + '</td>' +
+                const nameDisplay = e.Username + (isPending ? ' <span style="font-size: 0.8em;">(pending)</span>' : '');
+                const ratingDisplay = isPending ? '-' : '<strong>' + e.Rating + '</strong> <span style="color: #94a3b8; font-size: 0.85em;">±' + e.RD + '</span>';
+                const winsDisplay = isPending ? '-' : e.Wins.toLocaleString();
+                const lossesDisplay = isPending ? '-' : e.Losses.toLocaleString();
+                const winRateDisplay = isPending ? '-' : '<span class="win-rate ' + winRateClass + '">' + winRate + '%</span>';
+                const avgMovesDisplay = isPending ? '-' : e.AvgMoves.toFixed(1);
+                
+                return '<tr' + rowClass + '>' +
+                    '<td class="rank rank-' + rank + '">' + rankDisplay + '</td>' +
+                    '<td class="player-name"><a href="/user/' + e.Username + '" style="color: inherit; text-decoration: none;">' + nameDisplay + '</a></td>' +
+                    '<td>' + ratingDisplay + '</td>' +
+                    '<td>' + winsDisplay + '</td>' +
+                    '<td>' + lossesDisplay + '</td>' +
+                    '<td>' + winRateDisplay + '</td>' +
+                    '<td>' + avgMovesDisplay + '</td>' +
                     '<td style="color: #64748b;">' + lastPlayed + '</td>' +
                     '</tr>';
             }).join('');
@@ -554,15 +583,15 @@ const leaderboardHTML = `
                 <tbody>
                     {{if .Entries}}
                     {{range $i, $e := .Entries}}
-                    <tr>
-                        <td class="rank rank-{{add $i 1}}">{{if lt $i 3}}{{medal $i}}{{else}}{{add $i 1}}{{end}}</td>
-                        <td class="player-name"><a href="/user/{{$e.Username}}" style="color: inherit; text-decoration: none;">{{$e.Username}}</a></td>
-                        <td><strong>{{$e.Rating}}</strong> <span style="color: #94a3b8; font-size: 0.85em;">±{{$e.RD}}</span></td>
-                        <td>{{$e.Wins}}</td>
-                        <td>{{$e.Losses}}</td>
-                        <td><span class="win-rate {{winRateClass $e}}">{{winRate $e}}%</span></td>
-                        <td>{{printf "%.1f" $e.AvgMoves}}</td>
-                        <td style="color: #64748b;">{{$e.LastPlayed.Format "Jan 2, 3:04 PM"}}</td>
+                    <tr{{if $e.IsPending}} class="pending"{{end}}>
+                        <td class="rank rank-{{add $i 1}}">{{if $e.IsPending}}⏳{{else if lt $i 3}}{{medal $i}}{{else}}{{add $i 1}}{{end}}</td>
+                        <td class="player-name"><a href="/user/{{$e.Username}}" style="color: inherit; text-decoration: none;">{{$e.Username}}{{if $e.IsPending}} <span style="font-size: 0.8em;">(pending)</span>{{end}}</a></td>
+                        <td>{{if $e.IsPending}}-{{else}}<strong>{{$e.Rating}}</strong> <span style="color: #94a3b8; font-size: 0.85em;">±{{$e.RD}}</span>{{end}}</td>
+                        <td>{{if $e.IsPending}}-{{else}}{{$e.Wins}}{{end}}</td>
+                        <td>{{if $e.IsPending}}-{{else}}{{$e.Losses}}{{end}}</td>
+                        <td>{{if $e.IsPending}}-{{else}}<span class="win-rate {{winRateClass $e}}">{{winRate $e}}%</span>{{end}}</td>
+                        <td>{{if $e.IsPending}}-{{else}}{{printf "%.1f" $e.AvgMoves}}{{end}}</td>
+                        <td style="color: #64748b;">{{if $e.IsPending}}Waiting...{{else}}{{$e.LastPlayed.Format "Jan 2, 3:04 PM"}}{{end}}</td>
                     </tr>
                     {{end}}
                     {{else}}
