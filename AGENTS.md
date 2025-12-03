@@ -1,5 +1,7 @@
 # Development Notes
 
+**⚠️ AI Instructions: Do NOT create summary documents. User prefers to see actual code changes without additional documentation files.**
+
 ## Architecture
 
 - **main.go** - SSH/HTTP server initialization with Wish and Bubble Tea

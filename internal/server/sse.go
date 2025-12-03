@@ -25,9 +25,8 @@ type ProgressUpdate struct {
 }
 
 func InitSSE() {
-	SSEServer = sse.NewServer(&sse.Options{
-		Logger: log.New(log.Writer(), "go-sse: ", log.Ldate|log.Ltime),
-	})
+	// Disable verbose SSE library logging
+	SSEServer = sse.NewServer(nil)
 }
 
 func NotifyLeaderboardUpdate() {
@@ -78,7 +77,10 @@ func BroadcastProgress(player string, currentMatch, totalMatches int, startTime 
 		return
 	}
 	
-	log.Printf("Broadcasting progress: %s [%d/%d] %.1f%% (queue: %d)", player, currentMatch, totalMatches, percentComplete, len(filteredQueue))
+	// Only log every 10th match to reduce noise
+	if currentMatch%10 == 0 || currentMatch == totalMatches {
+		log.Printf("Progress: %s [%d/%d] %.0f%%", player, currentMatch, totalMatches, percentComplete)
+	}
 	
 	SSEServer.SendMessage("/events/updates", sse.SimpleMessage(string(data)))
 }
@@ -109,7 +111,6 @@ func BroadcastProgressComplete() {
 		return
 	}
 	
-	log.Printf("Broadcasting progress complete")
-	
+	// Silent - no log needed for routine completion
 	SSEServer.SendMessage("/events/updates", sse.SimpleMessage(string(data)))
 }

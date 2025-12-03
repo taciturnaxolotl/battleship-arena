@@ -448,7 +448,7 @@ const leaderboardHTML = `
                 
                 return '<tr>' +
                     '<td class="rank rank-' + rank + '">' + medal + '</td>' +
-                    '<td class="player-name"><a href="/player/' + e.Username + '" style="color: inherit; text-decoration: none;">' + e.Username + '</a></td>' +
+                    '<td class="player-name"><a href="/user/' + e.Username + '" style="color: inherit; text-decoration: none;">' + e.Username + '</a></td>' +
                     '<td><strong>' + e.Rating + '</strong> <span style="color: #94a3b8; font-size: 0.85em;">±' + e.RD + '</span></td>' +
                     '<td>' + e.Wins.toLocaleString() + '</td>' +
                     '<td>' + e.Losses.toLocaleString() + '</td>' +
@@ -555,7 +555,7 @@ const leaderboardHTML = `
                     {{range $i, $e := .Entries}}
                     <tr>
                         <td class="rank rank-{{add $i 1}}">{{if lt $i 3}}{{medal $i}}{{else}}{{add $i 1}}{{end}}</td>
-                        <td class="player-name"><a href="/player/{{$e.Username}}" style="color: inherit; text-decoration: none;">{{$e.Username}}</a></td>
+                        <td class="player-name"><a href="/user/{{$e.Username}}" style="color: inherit; text-decoration: none;">{{$e.Username}}</a></td>
                         <td><strong>{{$e.Rating}}</strong> <span style="color: #94a3b8; font-size: 0.85em;">±{{$e.RD}}</span></td>
                         <td>{{$e.Wins}}</td>
                         <td>{{$e.Losses}}</td>
@@ -580,9 +580,16 @@ const leaderboardHTML = `
         
         <div class="info-card">
             <h3>📤 How to Submit</h3>
-            <p>Connect via SSH to submit your battleship AI:</p>
+            <p><strong>First time?</strong> Connect via SSH to create your account:</p>
             <p><code>ssh -p 2222 username@localhost</code></p>
-            <p style="margin-top: 1rem;">Upload your <code>memory_functions_*.cpp</code> file and compete in the arena!</p>
+            <p style="margin-top: 0.5rem; color: #94a3b8;">You'll be prompted for your name, bio, and link. Your SSH key will be registered.</p>
+            
+            <p style="margin-top: 1rem;"><strong>Upload your AI:</strong></p>
+            <p><code>scp -P 2222 memory_functions_yourname.cpp username@localhost:~/</code></p>
+            
+            <p style="margin-top: 1rem; color: #94a3b8;">
+                <a href="/users" style="color: #60a5fa;">View all players →</a>
+            </p>
         </div>
     </div>
     

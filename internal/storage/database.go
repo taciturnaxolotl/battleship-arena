@@ -77,6 +77,17 @@ func InitDB(path string) (*sql.DB, error) {
 	}
 
 	schema := `
+	CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT UNIQUE NOT NULL,
+		name TEXT NOT NULL,
+		bio TEXT,
+		link TEXT,
+		public_key TEXT UNIQUE NOT NULL,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		last_login_at TIMESTAMP
+	);
+
 	CREATE TABLE IF NOT EXISTS submissions (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		username TEXT NOT NULL,

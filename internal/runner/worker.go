@@ -37,7 +37,7 @@ func StartWorker(ctx context.Context, uploadDir string, broadcastFunc func(strin
 
 func processSubmissionsWithLock(uploadDir string, broadcastFunc func(string, int, int, time.Time, []string), notifyFunc func(), completeFunc func()) error {
 	if !workerMutex.TryLock() {
-		log.Printf("Worker already running, skipping this cycle")
+		// Silently skip if worker is already running
 		return nil
 	}
 	defer workerMutex.Unlock()
@@ -49,6 +49,11 @@ func ProcessSubmissions(uploadDir string, broadcastFunc func(string, int, int, t
 	submissions, err := storage.GetPendingSubmissions()
 	if err != nil {
 		return err
+	}
+	
+	// Only do work if there are pending submissions
+	if len(submissions) == 0 {
+		return nil
 	}
 
 	for _, sub := range submissions {
@@ -67,6 +72,7 @@ func ProcessSubmissions(uploadDir string, broadcastFunc func(string, int, int, t
 		notifyFunc()
 	}
 	
+	// Check if queue is now empty
 	queuedPlayers := storage.GetQueuedPlayerNames()
 	if len(queuedPlayers) == 0 {
 		completeFunc()

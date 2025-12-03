@@ -33,34 +33,43 @@ func (h *validatingHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, e
 	filename := filepath.Base(entry.Name)
 	log.Printf("SCP Write called: entry.Name=%s, filename=%s, size=%d", entry.Name, filename, entry.Size)
 	
-	// Skip validation for directory markers (SCP protocol negotiation)
+	// Skip validation for directory markers
 	if filename == "~" || filename == "." || filename == ".." {
 		log.Printf("Skipping directory marker: %s", filename)
 		return 0, nil
 	}
 	
-	// Validate filename (must be memory_functions_*.cpp)
+	// Validate filename
 	if !strings.HasPrefix(filename, "memory_functions_") || !strings.HasSuffix(filename, ".cpp") {
 		log.Printf("Invalid filename from %s: %s", s.User(), filename)
 		return 0, fmt.Errorf("only memory_functions_*.cpp files are accepted")
 	}
+	
+	// Check if this is an admin override session
+	isAdmin := false
+	if val := s.Context().Value("admin_override"); val != nil {
+		isAdmin = val.(bool)
+	}
+	
+	targetUser := s.User()
+	if isAdmin {
+		log.Printf("🔑 Admin override: uploading as %s", targetUser)
+	}
 
-	userDir := filepath.Join(h.uploadDir, s.User())
+	userDir := filepath.Join(h.uploadDir, targetUser)
 	if err := os.MkdirAll(userDir, 0755); err != nil {
 		log.Printf("Failed to create user directory: %v", err)
 		return 0, err
 	}
 
-	// Remove old file if it exists to ensure clean overwrite
 	targetPath := filepath.Join(userDir, filename)
 	if _, err := os.Stat(targetPath); err == nil {
 		log.Printf("Removing old file: %s", targetPath)
 		os.Remove(targetPath)
 	}
 
-	// Modify the entry to write to user's subdirectory
 	userEntry := &scp.FileEntry{
-		Name:   filepath.Join(s.User(), filename),
+		Name:   filepath.Join(targetUser, filename),
 		Mode:   entry.Mode,
 		Size:   entry.Size,
 		Reader: entry.Reader,
@@ -74,15 +83,13 @@ func (h *validatingHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, e
 		return n, err
 	}
 
-	log.Printf("Uploaded %s from %s (%d bytes)", filename, s.User(), n)
+	log.Printf("Uploaded %s from %s (%d bytes)", filename, targetUser, n)
 	
-	// Add submission and trigger testing
-	submissionID, err := storage.AddSubmission(s.User(), filename)
+	submissionID, err := storage.AddSubmission(targetUser, filename)
 	if err != nil {
 		log.Printf("Failed to add submission: %v", err)
 	} else {
 		log.Printf("Queued submission %d for testing", submissionID)
-		// The worker will pick it up automatically
 	}
 	
 	return n, nil
