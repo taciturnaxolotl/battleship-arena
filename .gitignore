@@ -1,7 +1,7 @@
 .ssh/
 submissions/
 *.db
-battleship-arena
+bin
 *.log
 build/
 
