@@ -17,13 +17,15 @@ import (
 	"github.com/charmbracelet/wish/bubbletea"
 	"github.com/charmbracelet/wish/logging"
 	"github.com/charmbracelet/wish/scp"
+	"github.com/alexandrevicenzi/go-sse"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 const (
 	host      = "0.0.0.0"
 	sshPort   = "2222"
-	webPort   = "8080"
-	ssePort   = "8081"
+	webPort   = "8081"
 	uploadDir = "./submissions"
 	resultsDB = "./results.db"
 )
@@ -34,23 +36,19 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Initialize SSE server
-	initSSE()
-
-	// Start SSE server on separate port
-	go startSSEServer()
+	// Initialize SSE server EXACTLY like test
+	s := sse.NewServer(nil)
+	defer s.Shutdown()
+	sseServer = s
 
 	// Start background worker
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	defer workerCancel()
 	go startWorker(workerCtx)
 
-	// Start web server
-	go startWebServer()
-
-	// Start SSH server with TUI, SCP, and SFTP
+	// Start SSH server in background
 	toClient, fromClient := newSCPHandlers()
-	s, err := wish.NewServer(
+	sshServer, err := wish.NewServer(
 		wish.WithAddress(host + ":" + sshPort),
 		wish.WithHostKeyPath(".ssh/battleship_arena"),
 		wish.WithSubsystem("sftp", sftpHandler),
@@ -71,18 +69,49 @@ func main() {
 	log.Printf("Web leaderboard at http://%s:%s", host, webPort)
 
 	go func() {
-		if err := s.ListenAndServe(); err != nil && !errors.Is(err, ssh.ErrServerClosed) {
+		if err := sshServer.ListenAndServe(); err != nil && !errors.Is(err, ssh.ErrServerClosed) {
 			log.Fatal(err)
 		}
 	}()
 
-	<-done
-	log.Println("Shutting down servers...")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if err := s.Shutdown(ctx); err != nil && !errors.Is(err, ssh.ErrServerClosed) {
-		log.Fatal(err)
-	}
+	// Graceful shutdown handler
+	go func() {
+		<-done
+		log.Println("Shutting down servers...")
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := sshServer.Shutdown(ctx); err != nil && !errors.Is(err, ssh.ErrServerClosed) {
+			log.Fatal(err)
+		}
+		os.Exit(0)
+	}()
+
+	// Start web server EXACTLY like test
+	r := chi.NewRouter()
+	
+	// Middleware
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
+	
+	// SSE endpoint - mounted directly to router
+	r.Mount("/events/", s)
+	
+	// API routes
+	r.Get("/api/leaderboard", handleAPILeaderboard)
+	r.Get("/api/rating-history/{player}", handleRatingHistory)
+	
+	// Player pages
+	r.Get("/player/{player}", handlePlayerPage)
+	
+	// Home page
+	r.Get("/", handleLeaderboard)
+	
+	// Static files
+	fs := http.FileServer(http.Dir("./static"))
+	r.Handle("/static/*", http.StripPrefix("/static/", fs))
+
+	log.Println("Server running at http://localhost:" + webPort)
+	http.ListenAndServe(":"+webPort, r)
 }
 
 func teaHandler(s ssh.Session) (tea.Model, []tea.ProgramOption) {
@@ -117,49 +146,48 @@ func initStorage() error {
 
 func startWebServer() {
 	mux := http.NewServeMux()
+	
+	// SSE endpoint with explicit logging
+	mux.HandleFunc("/events/", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("SSE request received: %s", r.URL.Path)
+		
+		// Try to manually write headers and flush BEFORE SSE library
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+		
+		log.Printf("Headers set, writing header...")
+		w.WriteHeader(http.StatusOK)
+		
+		if flusher, ok := w.(http.Flusher); ok {
+			log.Printf("Flushing headers manually...")
+			flusher.Flush()
+			log.Printf("Headers flushed!")
+		} else {
+			log.Printf("NO FLUSHER!")
+		}
+		
+		log.Printf("Calling SSE ServeHTTP...")
+		sseServer.ServeHTTP(w, r)
+		log.Printf("SSE ServeHTTP returned")
+	})
+	
+	// Web routes (no Chi)
 	mux.HandleFunc("/", handleLeaderboard)
 	mux.HandleFunc("/api/leaderboard", handleAPILeaderboard)
 	mux.HandleFunc("/api/rating-history/", handleRatingHistory)
 	mux.HandleFunc("/player/", handlePlayerPage)
 	
-	// Serve static files
+	// Static files
 	fs := http.FileServer(http.Dir("./static"))
 	mux.Handle("/static/", http.StripPrefix("/static/", fs))
 	
-	server := &http.Server{
-		Addr:           ":" + webPort,
-		Handler:        mux,
-		ReadTimeout:    0, // No timeout for SSE
-		WriteTimeout:   0, // No timeout for SSE
-		MaxHeaderBytes: 1 << 20,
-	}
-	
 	log.Printf("Web server starting on :%s", webPort)
-	if err := server.ListenAndServe(); err != nil {
-		log.Fatal(err)
-	}
+	http.ListenAndServe(":"+webPort, mux)
 }
 
-func startSSEServer() {
-	// Wrap SSE server with CORS middleware
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		
-		sseServer.ServeHTTP(w, r)
-	})
-	
-	log.Printf("SSE server starting on :%s", ssePort)
-	if err := http.ListenAndServe(":"+ssePort, handler); err != nil {
-		log.Fatal(err)
-	}
-}
+
 
 var titleStyle = lipgloss.NewStyle().
 	Bold(true).

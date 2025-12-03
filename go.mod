@@ -3,13 +3,14 @@ module battleship-arena
 go 1.25.4
 
 require (
+	github.com/alexandrevicenzi/go-sse v1.6.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/ssh v0.0.0-20250826160808-ebfa259c7309
 	github.com/charmbracelet/wish v1.4.7
+	github.com/go-chi/chi/v5 v5.2.3
 	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/pkg/sftp v1.13.10
-	github.com/r3labs/sse/v2 v2.10.0
 )
 
 require (
@@ -38,12 +39,9 @@ require (
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	github.com/tmaxmax/go-sse v0.11.0 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/crypto v0.41.0 // indirect
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56 // indirect
-	golang.org/x/net v0.42.0 // indirect
 	golang.org/x/sys v0.36.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
-	gopkg.in/cenkalti/backoff.v1 v1.1.0 // indirect
 )

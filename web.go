@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	
+	"github.com/go-chi/chi/v5"
 )
 
 const leaderboardHTML = `
@@ -379,7 +381,7 @@ const leaderboardHTML = `
         
         function connectSSE() {
             console.log('Connecting to SSE...');
-            eventSource = new EventSource('http://localhost:8081');
+            eventSource = new EventSource('/events/updates');
             
             eventSource.onopen = () => {
                 console.log('SSE connection established');
@@ -387,6 +389,8 @@ const leaderboardHTML = `
             };
             
             eventSource.onmessage = (event) => {
+                console.log('SSE raw event:', event);
+                console.log('SSE event.data:', event.data);
                 try {
                     const data = JSON.parse(event.data);
                     console.log('SSE message received:', data);
@@ -402,9 +406,11 @@ const leaderboardHTML = `
                         // Leaderboard update
                         console.log('Updating leaderboard with', data.length, 'entries');
                         updateLeaderboard(data);
+                    } else {
+                        console.log('Unknown message type:', data);
                     }
                 } catch (error) {
-                    console.error('Failed to parse SSE data:', error);
+                    console.error('Failed to parse SSE data:', error, 'Raw data:', event.data);
                 }
             };
             
@@ -693,8 +699,7 @@ func calculateTotalGames(entries []LeaderboardEntry) int {
 }
 
 func handleRatingHistory(w http.ResponseWriter, r *http.Request) {
-	// Extract username from URL path /api/rating-history/{username}
-	username := r.URL.Path[len("/api/rating-history/"):]
+	username := chi.URLParam(r, "player")
 	if username == "" {
 		http.Error(w, "Username required", http.StatusBadRequest)
 		return
@@ -724,7 +729,7 @@ func handleRatingHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePlayerPage(w http.ResponseWriter, r *http.Request) {
-	username := r.URL.Path[len("/player/"):]
+	username := chi.URLParam(r, "player")
 	if username == "" {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return

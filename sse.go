@@ -4,10 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"time"
 
-	"github.com/tmaxmax/go-sse"
+	"github.com/alexandrevicenzi/go-sse"
 )
 
 var sseServer *sse.Server
@@ -24,12 +23,12 @@ type ProgressUpdate struct {
 }
 
 func initSSE() {
-	sseServer = &sse.Server{}
+	sseServer = sse.NewServer(&sse.Options{
+		Logger: log.New(log.Writer(), "go-sse: ", log.Ldate|log.Ltime),
+	})
 }
 
-func handleSSE(w http.ResponseWriter, r *http.Request) {
-	sseServer.ServeHTTP(w, r)
-}
+
 
 // NotifyLeaderboardUpdate sends updated leaderboard to all connected clients
 func NotifyLeaderboardUpdate() {
@@ -45,12 +44,7 @@ func NotifyLeaderboardUpdate() {
 		return
 	}
 
-	msg := &sse.Message{}
-	msg.AppendData(string(data))
-
-	if err := sseServer.Publish(msg); err != nil {
-		log.Printf("SSE: publish failed: %v", err)
-	}
+	sseServer.SendMessage("/events/updates", sse.SimpleMessage(string(data)))
 }
 
 func broadcastProgress(player string, currentMatch, totalMatches int, startTime time.Time, queuedPlayers []string) {
@@ -90,13 +84,7 @@ func broadcastProgress(player string, currentMatch, totalMatches int, startTime 
 	
 	log.Printf("Broadcasting progress: %s [%d/%d] %.1f%% (queue: %d)", player, currentMatch, totalMatches, percentComplete, len(filteredQueue))
 	
-	msg := &sse.Message{}
-	msg.AppendData(string(data))
-	// Don't set Type - just send as regular message
-	
-	if err := sseServer.Publish(msg); err != nil {
-		log.Printf("SSE: progress publish failed: %v", err)
-	}
+	sseServer.SendMessage("/events/updates", sse.SimpleMessage(string(data)))
 }
 
 func formatDuration(d time.Duration) string {
@@ -127,9 +115,5 @@ func broadcastProgressComplete() {
 	
 	log.Printf("Broadcasting progress complete")
 	
-	msg := &sse.Message{}
-	msg.AppendData(string(data))
-	// Don't set Type - just send as regular message
-	
-	sseServer.Publish(msg)
+	sseServer.SendMessage("/events/updates", sse.SimpleMessage(string(data)))
 }
