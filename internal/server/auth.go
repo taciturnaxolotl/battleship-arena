@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 
 	"github.com/charmbracelet/ssh"
@@ -14,15 +13,15 @@ import (
 	"battleship-arena/internal/storage"
 )
 
-var adminPasscode string
+var (
+	adminPasscode string
+	externalURL   string
+)
 
-func init() {
-	// Load admin passcode from environment variable
-	adminPasscode = os.Getenv("BATTLESHIP_ADMIN_PASSCODE")
-	if adminPasscode == "" {
-		adminPasscode = "battleship-admin-override" // Default fallback
-		log.Printf("⚠️  Using default admin passcode. Set BATTLESHIP_ADMIN_PASSCODE env var for security.")
-	}
+func SetConfig(passcode, url string) {
+	adminPasscode = passcode
+	externalURL = url
+	log.Printf("✓ Config loaded: passcode=%s..., url=%s", passcode[:10], url)
 }
 
 func PublicKeyAuthHandler(ctx ssh.Context, key ssh.PublicKey) bool {
