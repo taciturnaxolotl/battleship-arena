@@ -6,6 +6,12 @@
 HOST="localhost"
 PORT="2222"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Load from .env file if exists
+if [ -f "$PROJECT_ROOT/.env" ]; then
+    export $(cat "$PROJECT_ROOT/.env" | grep -v '^#' | xargs)
+fi
 
 # Admin passcode (set via environment variable or use default)
 ADMIN_PASSCODE="${BATTLESHIP_ADMIN_PASSCODE:-battleship-admin-override}"
@@ -54,14 +60,13 @@ for submission in "${SUBMISSIONS[@]}"; do
         continue
     fi
     
-    # Use sshpass to provide password authentication
-    # If sshpass not available, use expect or manual password entry
+    # Use sshpass to provide password authentication automatically
     if command -v sshpass &> /dev/null; then
-        sshpass -p "$ADMIN_PASSCODE" scp -P $PORT "$SCRIPT_DIR/test-submissions/$filename" "$username@$HOST:~/$filename" 2>&1 | grep -q "100%"
+        sshpass -p "$ADMIN_PASSCODE" scp -o StrictHostKeyChecking=no -P $PORT "$SCRIPT_DIR/test-submissions/$filename" "$username@$HOST:~/$filename" 2>&1 | grep -q "100%"
         result=$?
     else
-        echo "   Using manual password authentication (enter passcode when prompted)"
-        echo "   Password: $ADMIN_PASSCODE"
+        echo "❌ Error: sshpass not installed. Install with: brew install hudochenkov/sshpass/sshpass"
+        echo "   Or set ADMIN_PASSCODE env var and enter manually when prompted"
         scp -P $PORT "$SCRIPT_DIR/test-submissions/$filename" "$username@$HOST:~/$filename" 2>&1 | grep -q "100%"
         result=$?
     fi
