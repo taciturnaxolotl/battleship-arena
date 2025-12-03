@@ -5,6 +5,8 @@ bin
 *.log
 build/
 
+./battleship-arena
+
 # Generated files in engine
 battleship-engine/src/memory_functions_*.cpp
 battleship-engine/src/memory_functions_*.h
