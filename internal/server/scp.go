@@ -69,10 +69,11 @@ func (h *validatingHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, e
 	}
 
 	userEntry := &scp.FileEntry{
-		Name:   filepath.Join(targetUser, filename),
-		Mode:   entry.Mode,
-		Size:   entry.Size,
-		Reader: entry.Reader,
+		Name:     filename,
+		Filepath: filepath.Join(targetUser, filename),
+		Mode:     entry.Mode,
+		Size:     entry.Size,
+		Reader:   entry.Reader,
 	}
 	
 	log.Printf("Writing to: %s", filepath.Join(h.uploadDir, userEntry.Name))
