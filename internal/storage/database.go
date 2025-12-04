@@ -219,7 +219,7 @@ func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		1 as is_pending
 	FROM submissions s
 	LEFT JOIN matches m ON (m.player1_id = s.id OR m.player2_id = s.id) AND m.is_valid = 1
-	WHERE s.is_active = 1 AND s.status IN ('pending', 'testing')
+	WHERE s.is_active = 1 AND s.status IN ('pending', 'testing', 'completed')
 	GROUP BY s.username, s.upload_time
 	HAVING COUNT(m.id) = 0
 	
