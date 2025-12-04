@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
-	
+
 	"github.com/go-chi/chi/v5"
-	
+
 	"battleship-arena/internal/storage"
 )
 
@@ -256,11 +256,90 @@ const leaderboardHTML = `
         
         code {
             background: #0f172a;
-            padding: 0.375rem 0.75rem;
-            border-radius: 0.375rem;
+            padding: 0.5rem 0.875rem;
+            border-radius: 0.5rem;
             font-family: 'Monaco', 'Courier New', monospace;
             font-size: 0.875rem;
-            color: #3b82f6;
+            color: #60a5fa;
+            border: 1px solid #1e3a8a;
+            display: inline-block;
+            line-height: 1.5;
+        }
+        
+        .code-block {
+            position: relative;
+            background: #0f172a;
+            border: 1px solid #1e3a8a;
+            border-radius: 0.5rem;
+            margin: 1rem 0;
+            overflow: hidden;
+        }
+        
+        .code-block-header {
+            background: #1e3a8a;
+            padding: 0.5rem 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #1e3a8a;
+        }
+        
+        .code-block-lang {
+            color: #94a3b8;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .code-block-copy {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 0.25rem 0.75rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .code-block-copy:hover {
+            background: #2563eb;
+        }
+        
+        .code-block-copy.copied {
+            background: #10b981;
+        }
+        
+        .code-block pre {
+            margin: 0;
+            padding: 1rem;
+            overflow-x: auto;
+        }
+        
+        .code-block code {
+            background: transparent;
+            border: none;
+            padding: 0;
+            display: block;
+            color: #e2e8f0;
+        }
+        
+        .code-block .token-command {
+            color: #60a5fa;
+        }
+        
+        .code-block .token-flag {
+            color: #a78bfa;
+        }
+        
+        .code-block .token-string {
+            color: #34d399;
+        }
+        
+        .code-block .token-comment {
+            color: #64748b;
+            font-style: italic;
         }
         
         .empty-state {
@@ -538,6 +617,25 @@ const leaderboardHTML = `
         window.addEventListener('DOMContentLoaded', () => {
             connectSSE();
         });
+        
+        function copyCode(button, text) {
+            // Decode HTML entities in template variables
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = text;
+            const decodedText = tempDiv.textContent || tempDiv.innerText;
+            
+            navigator.clipboard.writeText(decodedText).then(() => {
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                button.classList.add('copied');
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.classList.remove('copied');
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+            });
+        }
     </script>
 </head>
 <body>
@@ -611,11 +709,26 @@ const leaderboardHTML = `
         <div class="info-card">
             <h3>📤 How to Submit</h3>
             <p><strong>First time?</strong> Connect via SSH to create your account:</p>
-            <p><code>ssh -p 2222 username@{{.ServerURL}}</code></p>
+            
+            <div class="code-block">
+                <div class="code-block-header">
+                    <span class="code-block-lang">bash</span>
+                    <button class="code-block-copy" onclick="copyCode(this, 'ssh -p 2222 {{.ServerURL}}')">Copy</button>
+                </div>
+                <pre><code><span class="token-command">ssh</span> <span class="token-flag">-p</span> <span class="token-string">2222</span> <span class="token-string">{{.ServerURL}}</span></code></pre>
+            </div>
+            
             <p style="margin-top: 0.5rem; color: #94a3b8;">You'll be prompted for your name, bio, and link. Your SSH key will be registered.</p>
             
             <p style="margin-top: 1rem;"><strong>Upload your AI:</strong></p>
-            <p><code>scp -P 2222 memory_functions_yourname.cpp username@{{.ServerURL}}:~/</code></p>
+            
+            <div class="code-block">
+                <div class="code-block-header">
+                    <span class="code-block-lang">bash</span>
+                    <button class="code-block-copy" onclick="copyCode(this, 'scp -P 2222 memory_functions_yourname.cpp {{.ServerURL}}:~/')">Copy</button>
+                </div>
+                <pre><code><span class="token-command">scp</span> <span class="token-flag">-P</span> <span class="token-string">2222</span> <span class="token-string">memory_functions_yourname.cpp</span> <span class="token-string">{{.ServerURL}}:~/</span></code></pre>
+            </div>
             
             <p style="margin-top: 1rem; color: #94a3b8;">
                 <a href="/users" style="color: #60a5fa;">View all players →</a>
@@ -687,7 +800,7 @@ func HandleLeaderboard(w http.ResponseWriter, r *http.Request) {
 	if entries == nil {
 		entries = []storage.LeaderboardEntry{}
 	}
-	
+
 	// Get matches for bracket
 	matches, err := storage.GetAllMatches()
 	if err != nil {
@@ -729,8 +842,6 @@ func HandleAPILeaderboard(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(entries)
 }
 
-
-
 func calculateTotalGames(entries []storage.LeaderboardEntry) int {
 	total := 0
 	for _, e := range entries {
@@ -745,26 +856,26 @@ func HandleRatingHistory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Username required", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Get submission ID for this username
 	var submissionID int
 	err := storage.DB.QueryRow(
 		"SELECT id FROM submissions WHERE username = ? AND is_active = 1",
 		username,
 	).Scan(&submissionID)
-	
+
 	if err != nil {
 		http.Error(w, "Player not found", http.StatusNotFound)
 		return
 	}
-	
+
 	// Get rating history
 	history, err := storage.GetRatingHistory(submissionID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to get rating history: %v", err), http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(history)
 }
@@ -775,7 +886,7 @@ func HandlePlayerPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	
+
 	tmpl := template.Must(template.New("player").Parse(playerPageHTML))
 	tmpl.Execute(w, map[string]string{"Username": username})
 }
@@ -1036,4 +1147,3 @@ const playerPageHTML = `
 </body>
 </html>
 `
-
