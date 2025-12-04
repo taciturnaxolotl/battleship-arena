@@ -464,11 +464,65 @@ const leaderboardHTML = `
             padding: 0.25rem 0;
         }
         
+        .hidden {
+            display: none;
+        }
+        
+        .tooltip {
+            position: relative;
+            display: inline-block;
+            cursor: help;
+        }
+        
+        .tooltip:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1e293b;
+            border: 1px solid #3b82f6;
+            color: #e2e8f0;
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.375rem;
+            font-size: 0.75rem;
+            white-space: nowrap;
+            z-index: 1000;
+            margin-bottom: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+        
+        .info-card ul {
+            list-style: none;
+            margin: 1rem 0;
+        }
+        
+        .info-card li {
+            padding: 0.5rem 0;
+            color: #94a3b8;
+            display: flex;
+            align-items: start;
+            gap: 0.5rem;
+        }
+        
+        .info-card li::before {
+            content: "→";
+            color: #3b82f6;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+        
         @media (max-width: 768px) {
             h1 { font-size: 2rem; }
             .subtitle { font-size: 1rem; }
             th, td { padding: 0.75rem 1rem; font-size: 0.875rem; }
             .stat-value { font-size: 2rem; }
+            .progress-indicator {
+                bottom: 1rem;
+                right: 1rem;
+                left: 1rem;
+                min-width: unset;
+            }
         }
     </style>
     <script>
@@ -670,11 +724,11 @@ const leaderboardHTML = `
                     <tr>
                         <th>Rank</th>
                         <th>Player</th>
-                        <th>Rating</th>
+                        <th><span class="tooltip" data-tooltip="Glicko-2 rating: higher is better">Rating</span></th>
                         <th>Wins</th>
                         <th>Losses</th>
                         <th>Win Rate</th>
-                        <th>Avg Moves</th>
+                        <th><span class="tooltip" data-tooltip="Average moves to win (lower is better)">Avg Moves</span></th>
                         <th>Last Active</th>
                     </tr>
                 </thead>
@@ -730,8 +784,16 @@ const leaderboardHTML = `
                 <pre><code><span class="token-command">scp</span> <span class="token-flag">-P</span> <span class="token-string">2222</span> <span class="token-string">memory_functions_yourname.cpp</span> <span class="token-string">{{.ServerURL}}:~/</span></code></pre>
             </div>
             
+            <p style="margin-top: 1.5rem;"><strong>How it works:</strong></p>
+            <ul>
+                <li>Your AI plays 1000 games against each opponent</li>
+                <li>Rankings use Glicko-2 rating system (like chess)</li>
+                <li>Lower average moves = more efficient strategy</li>
+                <li>Live updates as matches complete</li>
+            </ul>
+            
             <p style="margin-top: 1rem; color: #94a3b8;">
-                <a href="/users" style="color: #60a5fa;">View all players →</a>
+                <a href="/users" style="color: #60a5fa; text-decoration: none;">View all players →</a>
             </p>
         </div>
     </div>
