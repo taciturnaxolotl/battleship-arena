@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"battleship-arena/internal/storage"
@@ -21,6 +23,47 @@ func getEnginePath() string {
 		return path
 	}
 	return "./battleship-engine"
+}
+
+// runSandboxed executes a command in a systemd-run sandbox with resource limits
+func runSandboxed(ctx context.Context, name string, args []string, timeoutSec int) ([]byte, error) {
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
+	defer cancel()
+	
+	// Build systemd-run command with security properties
+	systemdArgs := []string{
+		"--user",           // Run as current user (not system-wide)
+		"--scope",          // Create transient scope unit
+		"--quiet",          // Suppress systemd output
+		"--collect",        // Automatically clean up after exit
+		"--property=MemoryMax=512M",        // Max 512MB RAM
+		"--property=CPUQuota=200%",         // Max 2 CPU cores worth
+		"--property=TasksMax=50",           // Max 50 processes/threads
+		"--property=PrivateNetwork=true",   // Isolate network (no internet)
+		"--property=PrivateTmp=true",       // Private /tmp
+		"--property=ProtectHome=true",      // Make /home inaccessible
+		"--property=ProtectSystem=strict",  // Read-only /usr, /boot, /etc
+		"--property=NoNewPrivileges=true",  // Prevent privilege escalation
+		"--",
+	}
+	systemdArgs = append(systemdArgs, args...)
+	
+	cmd := exec.CommandContext(ctx, "systemd-run", systemdArgs...)
+	
+	// Set process group for cleanup
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true,
+	}
+	
+	output, err := cmd.CombinedOutput()
+	
+	// Check for timeout
+	if ctx.Err() == context.DeadlineExceeded {
+		return output, fmt.Errorf("command timed out after %d seconds", timeoutSec)
+	}
+	
+	return output, err
 }
 
 func CompileSubmission(sub storage.Submission, uploadDir string) error {
@@ -67,12 +110,15 @@ func CompileSubmission(sub storage.Submission, uploadDir string) error {
 
 	log.Printf("Compiling submission %d for %s", sub.ID, prefix)
 	
-	cmd := exec.Command("g++", "-std=c++11", "-c", "-O3",
+	// Compile in sandbox with 60 second timeout
+	compileArgs := []string{
+		"g++", "-std=c++11", "-c", "-O3",
 		"-I", filepath.Join(enginePath, "src"),
 		"-o", filepath.Join(buildDir, "ai_"+prefix+".o"),
 		filepath.Join(enginePath, "src", sub.Filename),
-	)
-	output, err := cmd.CombinedOutput()
+	}
+	
+	output, err := runSandboxed(context.Background(), "compile-"+prefix, compileArgs, 60)
 	if err != nil {
 		return fmt.Errorf("compilation failed: %s", output)
 	}
@@ -140,11 +186,13 @@ func RunHeadToHead(player1, player2 storage.Submission, numGames int) (int, int,
 		return 0, 0, 0
 	}
 	
-	compileArgs := []string{"-std=c++11", "-O3",
+	// Compile match binary in sandbox with 120 second timeout
+	compileArgs := []string{"g++"}
+	compileArgs = append(compileArgs, "-std=c++11", "-O3",
 		"-o", combinedBinary,
 		mainPath,
 		filepath.Join(enginePath, "src", "battleship_light.cpp"),
-	}
+	)
 	
 	if prefix1 == prefix2 {
 		compileArgs = append(compileArgs, filepath.Join(enginePath, "src", fmt.Sprintf("memory_functions_%s.cpp", prefix1)))
@@ -155,17 +203,17 @@ func RunHeadToHead(player1, player2 storage.Submission, numGames int) (int, int,
 		)
 	}
 	
-	cmd := exec.Command("g++", compileArgs...)
-	output, err := cmd.CombinedOutput()
+	output, err := runSandboxed(context.Background(), "compile-match", compileArgs, 120)
 	if err != nil {
 		log.Printf("Failed to compile match binary: %s", output)
 		return 0, 0, 0
 	}
 	
-	cmd = exec.Command(combinedBinary, strconv.Itoa(numGames))
-	output, err = cmd.CombinedOutput()
+	// Run match in sandbox with 300 second timeout (1000 games should be ~60s, give headroom)
+	runArgs := []string{combinedBinary, strconv.Itoa(numGames)}
+	output, err = runSandboxed(context.Background(), "run-match", runArgs, 300)
 	if err != nil {
-		log.Printf("Match execution failed: %v", err)
+		log.Printf("Match execution failed: %v\n%s", err, output)
 		return 0, 0, 0
 	}
 	
