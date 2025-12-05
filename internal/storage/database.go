@@ -21,6 +21,7 @@ type LeaderboardEntry struct {
 	Stage      string
 	LastPlayed time.Time
 	IsPending  bool
+	IsBroken   bool
 }
 
 type Submission struct {
@@ -199,10 +200,11 @@ func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		SUM(CASE WHEN m.player1_id = s.id THEN m.player2_wins WHEN m.player2_id = s.id THEN m.player1_wins ELSE 0 END) as total_losses,
 		AVG(CASE WHEN m.player1_id = s.id THEN m.player1_moves ELSE m.player2_moves END) as avg_moves,
 		MAX(m.timestamp) as last_played,
-		0 as is_pending
+		0 as is_pending,
+		0 as is_broken
 	FROM submissions s
 	LEFT JOIN matches m ON (m.player1_id = s.id OR m.player2_id = s.id) AND m.is_valid = 1
-	WHERE s.is_active = 1
+	WHERE s.is_active = 1 AND s.status NOT IN ('compilation_failed')
 	GROUP BY s.username, s.glicko_rating, s.glicko_rd
 	HAVING COUNT(m.id) > 0
 	
@@ -216,14 +218,30 @@ func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		0 as total_losses,
 		0.0 as avg_moves,
 		s.upload_time as last_played,
-		1 as is_pending
+		1 as is_pending,
+		0 as is_broken
 	FROM submissions s
 	LEFT JOIN matches m ON (m.player1_id = s.id OR m.player2_id = s.id) AND m.is_valid = 1
 	WHERE s.is_active = 1 AND s.status IN ('pending', 'testing', 'completed')
 	GROUP BY s.username, s.upload_time
 	HAVING COUNT(m.id) = 0
 	
-	ORDER BY is_pending ASC, rating DESC, total_wins DESC
+	UNION ALL
+	
+	SELECT 
+		s.username,
+		0 as rating,
+		0 as rd,
+		0 as total_wins,
+		0 as total_losses,
+		0.0 as avg_moves,
+		s.upload_time as last_played,
+		0 as is_pending,
+		1 as is_broken
+	FROM submissions s
+	WHERE s.is_active = 1 AND s.status = 'compilation_failed'
+	
+	ORDER BY is_broken ASC, is_pending ASC, rating DESC, total_wins DESC
 	LIMIT ?
 	`
 
@@ -238,8 +256,8 @@ func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		var e LeaderboardEntry
 		var lastPlayed string
 		var rating, rd float64
-		var isPending int
-		err := rows.Scan(&e.Username, &rating, &rd, &e.Wins, &e.Losses, &e.AvgMoves, &lastPlayed, &isPending)
+		var isPending, isBroken int
+		err := rows.Scan(&e.Username, &rating, &rd, &e.Wins, &e.Losses, &e.AvgMoves, &lastPlayed, &isPending, &isBroken)
 		if err != nil {
 			return nil, err
 		}
@@ -247,6 +265,7 @@ func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		e.Rating = int(rating)
 		e.RD = int(rd)
 		e.IsPending = isPending == 1
+		e.IsBroken = isBroken == 1
 		
 		totalGames := e.Wins + e.Losses
 		if totalGames > 0 {

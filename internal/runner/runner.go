@@ -309,6 +309,7 @@ func generateHeader(filename, prefix string) string {
 #define %s
 
 #include "memory.h"
+#include "battleship_light.h"
 #include <string>
 
 void initMemory%s(ComputerMemory &memory);
