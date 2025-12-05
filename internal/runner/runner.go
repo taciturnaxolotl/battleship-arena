@@ -33,7 +33,6 @@ func runSandboxed(ctx context.Context, name string, args []string, timeoutSec in
 	
 	// Build systemd-run command with security properties
 	systemdArgs := []string{
-		"--user",           // Run as current user (not system-wide)
 		"--scope",          // Create transient scope unit
 		"--quiet",          // Suppress systemd output
 		"--collect",        // Automatically clean up after exit
