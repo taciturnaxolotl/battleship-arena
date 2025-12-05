@@ -32,6 +32,9 @@ func runSandboxed(ctx context.Context, name string, args []string, timeoutSec in
 	defer cancel()
 	
 	// Build systemd-run command with security properties
+	// Note: PrivateNetwork, PrivateTmp, ProtectHome, ProtectSystem, NoNewPrivileges
+	// are only available for service units, not scope units.
+	// Scope units only support resource limits (Memory, CPU, Tasks)
 	systemdArgs := []string{
 		"--scope",          // Create transient scope unit
 		"--quiet",          // Suppress systemd output
@@ -39,11 +42,6 @@ func runSandboxed(ctx context.Context, name string, args []string, timeoutSec in
 		"--property=MemoryMax=512M",        // Max 512MB RAM
 		"--property=CPUQuota=200%",         // Max 2 CPU cores worth
 		"--property=TasksMax=50",           // Max 50 processes/threads
-		"--property=PrivateNetwork=true",   // Isolate network (no internet)
-		"--property=PrivateTmp=true",       // Private /tmp
-		"--property=ProtectHome=true",      // Make /home inaccessible
-		"--property=ProtectSystem=strict",  // Read-only /usr, /boot, /etc
-		"--property=NoNewPrivileges=true",  // Prevent privilege escalation
 		"--",
 	}
 	systemdArgs = append(systemdArgs, args...)
