@@ -38,6 +38,7 @@ func runSandboxed(ctx context.Context, name string, args []string, timeoutSec in
 		"--quiet",          // Suppress systemd output
 		"--collect",        // Automatically clean up after exit
 		"--service-type=exec",  // Run until process exits
+		"--working-directory=/var/lib/battleship-arena",  // Ensure proper working directory
 		"--property=MemoryMax=512M",        // Max 512MB RAM
 		"--property=CPUQuota=200%",         // Max 2 CPU cores worth
 		"--property=TasksMax=50",           // Max 50 processes/threads
