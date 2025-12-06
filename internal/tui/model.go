@@ -12,6 +12,14 @@ import (
 	"battleship-arena/internal/storage"
 )
 
+type viewMode int
+
+const (
+	viewHome viewMode = iota
+	viewLeaderboard
+	viewProfile
+)
+
 var titleStyle = lipgloss.NewStyle().
 	Bold(true).
 	Foreground(lipgloss.Color("205")).
@@ -27,6 +35,7 @@ type model struct {
 	matches      []storage.MatchResult
 	externalURL  string
 	sshPort      string
+	currentView  viewMode
 }
 
 func InitialModel(username string, width, height int) model {
@@ -55,6 +64,7 @@ func InitialModel(username string, width, height int) model {
 		leaderboard: []storage.LeaderboardEntry{},
 		externalURL: externalURL,
 		sshPort:     sshPort,
+		currentView: viewHome,
 	}
 }
 
@@ -68,6 +78,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
+		case "h", "1":
+			m.currentView = viewHome
+		case "l", "2":
+			m.currentView = viewLeaderboard
+		case "p", "3":
+			m.currentView = viewProfile
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -76,8 +92,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.leaderboard = msg.entries
 	case submissionsMsg:
 		m.submissions = msg.submissions
+	case matchesMsg:
+		m.matches = msg.matches
 	case tickMsg:
-		return m, tea.Batch(loadLeaderboard, loadSubmissions(m.username), tickCmd())
+		return m, tea.Batch(loadLeaderboard, loadSubmissions(m.username), loadMatches, tickCmd())
 	}
 	return m, nil
 }
@@ -88,7 +106,42 @@ func (m model) View() string {
 	var b strings.Builder
 
 	title := titleStyle.Render("🚢 Battleship Arena")
-	b.WriteString(title + "\n\n")
+	b.WriteString(title + "\n")
+	
+	// Navigation tabs
+	tabStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	activeTabStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true)
+	
+	tabs := []string{"[h] Home", "[l] Leaderboard", "[p] Profile"}
+	for i, tab := range tabs {
+		if viewMode(i) == m.currentView {
+			b.WriteString(activeTabStyle.Render(tab))
+		} else {
+			b.WriteString(tabStyle.Render(tab))
+		}
+		if i < len(tabs)-1 {
+			b.WriteString("  ")
+		}
+	}
+	b.WriteString("\n\n")
+
+	// Render content based on current view
+	switch m.currentView {
+	case viewHome:
+		b.WriteString(m.renderHome())
+	case viewLeaderboard:
+		b.WriteString(m.renderLeaderboardView())
+	case viewProfile:
+		b.WriteString(m.renderProfile())
+	}
+
+	b.WriteString("\n\nPress q to quit")
+
+	return b.String()
+}
+
+func (m model) renderHome() string {
+	var b strings.Builder
 	
 	b.WriteString(fmt.Sprintf("User: %s\n\n", m.username))
 
@@ -100,16 +153,37 @@ func (m model) View() string {
 	// Show submissions
 	if len(m.submissions) > 0 {
 		b.WriteString(renderSubmissions(m.submissions))
+	} else {
+		b.WriteString("No submissions yet. Upload your first AI!\n")
+	}
+
+	return b.String()
+}
+
+func (m model) renderLeaderboardView() string {
+	if len(m.leaderboard) > 0 {
+		return renderLeaderboard(m.leaderboard)
+	}
+	return "Loading leaderboard..."
+}
+
+func (m model) renderProfile() string {
+	var b strings.Builder
+	
+	b.WriteString(fmt.Sprintf("Profile: %s\n\n", m.username))
+	
+	// Show user stats from submissions
+	if len(m.submissions) > 0 {
+		b.WriteString(renderSubmissions(m.submissions))
 		b.WriteString("\n")
 	}
-
-	// Show leaderboard if loaded
-	if len(m.leaderboard) > 0 {
-		b.WriteString(renderLeaderboard(m.leaderboard))
+	
+	// Show recent matches involving this user
+	if len(m.matches) > 0 {
+		b.WriteString("\nRecent Matches:\n")
+		b.WriteString(renderMatches(m.matches, m.username))
 	}
-
-	b.WriteString("\n\nPress q to quit")
-
+	
 	return b.String()
 }
 
@@ -243,6 +317,47 @@ func renderLeaderboard(entries []storage.LeaderboardEntry) string {
 			displayRank, entry.Username, ratingStr, entry.Wins, entry.Losses, entry.WinPct, entry.AvgMoves))
 	}
 
+	return b.String()
+}
+
+func renderMatches(matches []storage.MatchResult, username string) string {
+	var b strings.Builder
+	
+	// Filter to show only matches involving this user
+	userMatches := []storage.MatchResult{}
+	for _, match := range matches {
+		if match.Player1Username == username || match.Player2Username == username {
+			userMatches = append(userMatches, match)
+		}
+	}
+	
+	if len(userMatches) == 0 {
+		return "No matches yet"
+	}
+	
+	// Limit to last 10 matches
+	limit := 10
+	if len(userMatches) > limit {
+		userMatches = userMatches[:limit]
+	}
+	
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("240"))
+	b.WriteString(headerStyle.Render(fmt.Sprintf("%-20s %-20s %-20s %10s\n",
+		"Player 1", "Player 2", "Winner", "Avg Moves")))
+	b.WriteString("\n")
+	
+	for _, match := range userMatches {
+		line := fmt.Sprintf("%-20s vs %-20s → %-20s (%d moves)\n",
+			match.Player1Username, match.Player2Username, match.WinnerUsername, match.AvgMoves)
+		
+		// Highlight wins in green, losses in red
+		if match.WinnerUsername == username {
+			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("green")).Render(line))
+		} else {
+			b.WriteString(line)
+		}
+	}
+	
 	return b.String()
 }
 
