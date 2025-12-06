@@ -34,6 +34,7 @@ func runSandboxed(ctx context.Context, name string, args []string, timeoutSec in
 	// Build systemd-run command with security properties
 	// Using service unit (not scope) to get access to network/filesystem isolation
 	systemdArgs := []string{
+		"--wait",           // Wait for service to complete
 		"--unit=" + name,   // Give it a descriptive name
 		"--quiet",          // Suppress systemd output
 		"--collect",        // Automatically clean up after exit
