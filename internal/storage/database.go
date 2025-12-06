@@ -749,33 +749,24 @@ func RecalculateAllGlicko2Ratings() error {
 		return err
 	}
 	
-	// Get all active player IDs
-	var playerIDs []int
-	rows, err := DB.Query("SELECT id FROM submissions WHERE is_active = 1 AND status = 'completed'")
+	// Snapshot all player ratings BEFORE any updates (critical for proper rating period)
+	initialRatings := make(map[int]Glicko2Player)
+	rows, err := DB.Query("SELECT id, glicko_rating, glicko_rd, glicko_volatility FROM submissions WHERE is_active = 1 AND status = 'completed'")
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
 		var id int
-		if err := rows.Scan(&id); err != nil {
+		var rating, rd, volatility float64
+		if err := rows.Scan(&id, &rating, &rd, &volatility); err != nil {
 			return err
 		}
-		playerIDs = append(playerIDs, id)
+		initialRatings[id] = Glicko2Player{Rating: rating, RD: rd, Volatility: volatility}
 	}
 	rows.Close()
 	
 	// For each player, collect ALL their match results and update once (proper rating period)
-	for _, playerID := range playerIDs {
-		// Get player's current rating
-		var rating, rd, volatility float64
-		err := DB.QueryRow(
-			"SELECT glicko_rating, glicko_rd, glicko_volatility FROM submissions WHERE id = ?",
-			playerID,
-		).Scan(&rating, &rd, &volatility)
-		if err != nil {
-			continue
-		}
-		
+	for playerID, player := range initialRatings {
 		// Collect ALL match results for this player in this rating period
 		var results []Glicko2Result
 		
@@ -799,13 +790,9 @@ func RecalculateAllGlicko2Ratings() error {
 				continue
 			}
 			
-			// Get opponent's rating at the START of this rating period (not current)
-			var oppRating, oppRD float64
-			err := DB.QueryRow(
-				"SELECT glicko_rating, glicko_rd FROM submissions WHERE id = ?",
-				opponentID,
-			).Scan(&oppRating, &oppRD)
-			if err != nil {
+			// Get opponent's rating from initial snapshot (not from DB which may be updated)
+			opponent, ok := initialRatings[opponentID]
+			if !ok {
 				continue
 			}
 			
@@ -813,8 +800,8 @@ func RecalculateAllGlicko2Ratings() error {
 			score := float64(myWins) / float64(totalGames)
 			
 			results = append(results, Glicko2Result{
-				OpponentRating: oppRating,
-				OpponentRD:     oppRD,
+				OpponentRating: opponent.Rating,
+				OpponentRD:     opponent.RD,
 				Score:          score,
 			})
 		}
@@ -822,7 +809,6 @@ func RecalculateAllGlicko2Ratings() error {
 		
 		// Update this player's rating based on ALL results at once (proper rating period)
 		if len(results) > 0 {
-			player := Glicko2Player{Rating: rating, RD: rd, Volatility: volatility}
 			newPlayer := updateGlicko2(player, results)
 			
 			DB.Exec(
