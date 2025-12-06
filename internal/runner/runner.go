@@ -209,6 +209,12 @@ func RunHeadToHead(player1, player2 storage.Submission, numGames int) (int, int,
 		return 0, 0, 0
 	}
 	
+	// Check if binary was actually created
+	if _, err := os.Stat(combinedBinary); os.IsNotExist(err) {
+		log.Printf("Match binary was not created at %s, compilation output: %s", combinedBinary, output)
+		return 0, 0, 0
+	}
+	
 	// Run match in sandbox with 300 second timeout (1000 games should be ~60s, give headroom)
 	runArgs := []string{combinedBinary, strconv.Itoa(numGames)}
 	output, err = runSandboxed(context.Background(), "run-match", runArgs, 300)
