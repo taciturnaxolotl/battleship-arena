@@ -191,6 +191,9 @@ func InitDB(path string) (*sql.DB, error) {
 
 func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 	// Get submissions with matches
+	// Rankings use Glicko-2 with proper rating periods:
+	// - All round-robin matches are batched together before rating updates
+	// - This prevents last-submitter bias from path-dependent rating changes
 	query := `
 	SELECT 
 		s.username,
@@ -216,7 +219,7 @@ func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		350.0 as rd,
 		0 as total_wins,
 		0 as total_losses,
-		0.0 as avg_moves,
+		999.0 as avg_moves,
 		s.upload_time as last_played,
 		1 as is_pending,
 		0 as is_broken
@@ -234,14 +237,14 @@ func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		0 as rd,
 		0 as total_wins,
 		0 as total_losses,
-		0.0 as avg_moves,
+		999.0 as avg_moves,
 		s.upload_time as last_played,
 		0 as is_pending,
 		1 as is_broken
 	FROM submissions s
 	WHERE s.is_active = 1 AND s.status = 'compilation_failed'
 	
-	ORDER BY is_broken ASC, is_pending ASC, rating DESC, total_wins DESC
+	ORDER BY is_broken ASC, is_pending ASC, rating DESC, total_wins DESC, avg_moves ASC
 	LIMIT ?
 	`
 
@@ -731,4 +734,103 @@ func UpdateGlicko2Ratings(player1ID, player2ID, player1Wins, player2Wins int) er
 		p2New.Rating, p2New.RD, p2New.Volatility, player2ID,
 	)
 	return err
+}
+
+// RecalculateAllGlicko2Ratings recalculates all Glicko-2 ratings from scratch
+// using proper rating periods where all matches for a player are batched together
+func RecalculateAllGlicko2Ratings() error {
+	// Reset all active submissions to initial ratings
+	_, err := DB.Exec(`
+		UPDATE submissions 
+		SET glicko_rating = 1500.0, glicko_rd = 350.0, glicko_volatility = 0.06
+		WHERE is_active = 1 AND status = 'completed'
+	`)
+	if err != nil {
+		return err
+	}
+	
+	// Get all active player IDs
+	var playerIDs []int
+	rows, err := DB.Query("SELECT id FROM submissions WHERE is_active = 1 AND status = 'completed'")
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		playerIDs = append(playerIDs, id)
+	}
+	rows.Close()
+	
+	// For each player, collect ALL their match results and update once (proper rating period)
+	for _, playerID := range playerIDs {
+		// Get player's current rating
+		var rating, rd, volatility float64
+		err := DB.QueryRow(
+			"SELECT glicko_rating, glicko_rd, glicko_volatility FROM submissions WHERE id = ?",
+			playerID,
+		).Scan(&rating, &rd, &volatility)
+		if err != nil {
+			continue
+		}
+		
+		// Collect ALL match results for this player in this rating period
+		var results []Glicko2Result
+		
+		rows, err := DB.Query(`
+			SELECT 
+				CASE WHEN player1_id = ? THEN player2_id ELSE player1_id END as opponent_id,
+				CASE WHEN player1_id = ? THEN player1_wins ELSE player2_wins END as my_wins,
+				CASE WHEN player1_id = ? THEN player2_wins ELSE player1_wins END as opponent_wins
+			FROM matches
+			WHERE (player1_id = ? OR player2_id = ?) AND is_valid = 1
+			ORDER BY timestamp ASC
+		`, playerID, playerID, playerID, playerID, playerID)
+		
+		if err != nil {
+			continue
+		}
+		
+		for rows.Next() {
+			var opponentID, myWins, opponentWins int
+			if err := rows.Scan(&opponentID, &myWins, &opponentWins); err != nil {
+				continue
+			}
+			
+			// Get opponent's rating at the START of this rating period (not current)
+			var oppRating, oppRD float64
+			err := DB.QueryRow(
+				"SELECT glicko_rating, glicko_rd FROM submissions WHERE id = ?",
+				opponentID,
+			).Scan(&oppRating, &oppRD)
+			if err != nil {
+				continue
+			}
+			
+			totalGames := myWins + opponentWins
+			score := float64(myWins) / float64(totalGames)
+			
+			results = append(results, Glicko2Result{
+				OpponentRating: oppRating,
+				OpponentRD:     oppRD,
+				Score:          score,
+			})
+		}
+		rows.Close()
+		
+		// Update this player's rating based on ALL results at once (proper rating period)
+		if len(results) > 0 {
+			player := Glicko2Player{Rating: rating, RD: rd, Volatility: volatility}
+			newPlayer := updateGlicko2(player, results)
+			
+			DB.Exec(
+				"UPDATE submissions SET glicko_rating = ?, glicko_rd = ?, glicko_volatility = ? WHERE id = ?",
+				newPlayer.Rating, newPlayer.RD, newPlayer.Volatility, playerID,
+			)
+		}
+	}
+	
+	return nil
 }

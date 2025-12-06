@@ -61,6 +61,19 @@ func main() {
 	if err := initStorage(cfg); err != nil {
 		log.Fatal(err)
 	}
+	
+	// Check for special commands
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "recalculate-ratings":
+			log.Println("Recalculating all Glicko-2 ratings from scratch...")
+			if err := storage.RecalculateAllGlicko2Ratings(); err != nil {
+				log.Fatalf("Failed to recalculate ratings: %v", err)
+			}
+			log.Println("✓ Ratings recalculated successfully")
+			return
+		}
+	}
 
 	server.InitSSE()
 	server.SetConfig(cfg.AdminPasscode, cfg.ExternalURL)

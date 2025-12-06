@@ -12,6 +12,18 @@
 - **scp.go** - SCP upload middleware for file submissions
 - **worker.go** - Background processor (runs every 30s)
 
+## Glicko-2 Rating System
+
+**Important**: The system uses Glicko-2 ratings with **proper rating periods** to avoid last-submitter bias:
+
+- All matches in a round-robin are stored first
+- Ratings update **once at the end** using all match results together (proper rating period)
+- This eliminates path-dependency where identical algorithms get different ratings based on submission order
+- Each player's rating considers ALL their opponents' ratings at the start of the rating period
+- Glicko-2 expects 10-15+ games per rating period - our round-robin satisfies this
+
+**Manual recalculation**: Run `./battleship-arena recalculate-ratings` or `make recalculate-ratings` to recompute all ratings from scratch.
+
 ## File Upload
 
 Students upload via SCP:

@@ -48,16 +48,22 @@ build-prod:
 	@echo "Building for production..."
 	@CGO_ENABLED=1 go build -ldflags="-s -w" -o bin/battleship-arena ./cmd/battleship-arena
 
+# Recalculate all Glicko-2 ratings from scratch
+recalculate-ratings: build
+	@echo "Recalculating all Glicko-2 ratings..."
+	@./bin/battleship-arena recalculate-ratings
+
 # Show help
 help:
 	@echo "Available targets:"
-	@echo "  build       - Build the server"
-	@echo "  run         - Build and run the server"
-	@echo "  clean       - Clean build artifacts"
-	@echo "  test        - Run tests"
-	@echo "  gen-key     - Generate SSH host key"
-	@echo "  fmt         - Format code"
-	@echo "  lint        - Lint code"
-	@echo "  deps        - Update dependencies"
-	@echo "  build-prod  - Build optimized production binary"
-	@echo "  help        - Show this help"
+	@echo "  build              - Build the server"
+	@echo "  run                - Build and run the server"
+	@echo "  clean              - Clean build artifacts"
+	@echo "  test               - Run tests"
+	@echo "  gen-key            - Generate SSH host key"
+	@echo "  fmt                - Format code"
+	@echo "  lint               - Lint code"
+	@echo "  deps               - Update dependencies"
+	@echo "  build-prod         - Build optimized production binary"
+	@echo "  recalculate-ratings - Recalculate all Glicko-2 ratings from scratch"
+	@echo "  help               - Show this help"

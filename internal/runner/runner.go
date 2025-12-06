@@ -329,20 +329,21 @@ func RunRoundRobinMatches(newSub storage.Submission, uploadDir string, broadcast
 				map[int]string{newSub.ID: newSub.Username, opponent.ID: opponent.Username}[winnerID])
 		}
 		
-		matchID, err := storage.AddMatch(newSub.ID, opponent.ID, winnerID, player1Wins, player2Wins, avgMoves, avgMoves)
+		_, err := storage.AddMatch(newSub.ID, opponent.ID, winnerID, player1Wins, player2Wins, avgMoves, avgMoves)
 		if err != nil {
 			log.Printf("Failed to store match result: %v", err)
-		} else {
-			if err := storage.UpdateGlicko2Ratings(newSub.ID, opponent.ID, player1Wins, player2Wins); err != nil {
-				log.Printf("Glicko-2 update failed: %v", err)
-			} else {
-				recordRatingSnapshot(newSub.ID, int(matchID))
-				recordRatingSnapshot(opponent.ID, int(matchID))
-			}
 		}
 	}
 	
 	log.Printf("✓ Round-robin complete for %s (%d matches)", newSub.Username, totalMatches)
+	
+	// Update Glicko-2 ratings using proper rating periods (batch all matches together)
+	log.Printf("Updating Glicko-2 ratings (proper rating period)...")
+	if err := storage.RecalculateAllGlicko2Ratings(); err != nil {
+		log.Printf("Failed to update Glicko-2 ratings: %v", err)
+	} else {
+		log.Printf("✓ Glicko-2 ratings updated")
+	}
 }
 
 func recordRatingSnapshot(submissionID, matchID int) {
