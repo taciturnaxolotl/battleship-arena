@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -9,11 +10,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	
 	"battleship-arena/internal/storage"
-)
-
-const (
-	sshPort = "2222"
-	host    = "0.0.0.0"
 )
 
 var titleStyle = lipgloss.NewStyle().
@@ -29,15 +25,36 @@ type model struct {
 	submissions  []storage.Submission
 	leaderboard  []storage.LeaderboardEntry
 	matches      []storage.MatchResult
+	externalURL  string
+	sshPort      string
 }
 
 func InitialModel(username string, width, height int) model {
+	externalURL := os.Getenv("BATTLESHIP_EXTERNAL_URL")
+	if externalURL == "" {
+		externalURL = "localhost"
+	}
+	// Strip http:// or https:// prefix to get just the hostname
+	externalURL = strings.TrimPrefix(externalURL, "http://")
+	externalURL = strings.TrimPrefix(externalURL, "https://")
+	// Strip port if present
+	if idx := strings.Index(externalURL, ":"); idx != -1 {
+		externalURL = externalURL[:idx]
+	}
+	
+	sshPort := os.Getenv("BATTLESHIP_SSH_PORT")
+	if sshPort == "" {
+		sshPort = "2222"
+	}
+	
 	return model{
 		username:    username,
 		width:       width,
 		height:      height,
 		submissions: []storage.Submission{},
 		leaderboard: []storage.LeaderboardEntry{},
+		externalURL: externalURL,
+		sshPort:     sshPort,
 	}
 }
 
@@ -77,7 +94,7 @@ func (m model) View() string {
 
 	// Upload instructions
 	infoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("86"))
-	b.WriteString(infoStyle.Render(fmt.Sprintf("Upload via: scp -P %s memory_functions_yourname.cpp %s@%s:~/", sshPort, m.username, host)))
+	b.WriteString(infoStyle.Render(fmt.Sprintf("Upload via: scp -P %s memory_functions_yourname.cpp %s@%s:~/", m.sshPort, m.username, m.externalURL)))
 	b.WriteString("\n\n")
 
 	// Show submissions
