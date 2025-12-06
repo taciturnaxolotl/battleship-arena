@@ -206,13 +206,15 @@ func RunHeadToHead(player1, player2 storage.Submission, numGames int) (int, int,
 	
 	output, err := runSandboxed(context.Background(), "compile-match", compileArgs, 120)
 	if err != nil {
-		log.Printf("Failed to compile match binary: %s", output)
+		log.Printf("Failed to compile match binary (err=%v): %s", err, output)
 		return 0, 0, 0
 	}
 	
+	log.Printf("Match compilation output: %s", output)
+	
 	// Check if binary was actually created
 	if _, err := os.Stat(combinedBinary); os.IsNotExist(err) {
-		log.Printf("Match binary was not created at %s, compilation output: %s", combinedBinary, output)
+		log.Printf("Match binary was not created at %s, compilation succeeded but no binary found", combinedBinary)
 		return 0, 0, 0
 	}
 	
