@@ -92,6 +92,12 @@ func CompileSubmission(sub storage.Submission, uploadDir string) error {
 	if err != nil {
 		return err
 	}
+	
+	// Remove any #include "battleship.h" lines that conflict with battleship_light.h
+	inputStr := string(input)
+	inputStr = regexp.MustCompile(`(?m)^\s*#include\s+"battleship\.h"\s*$`).ReplaceAllString(inputStr, "")
+	input = []byte(inputStr)
+	
 	if err := os.WriteFile(dstPath, input, 0644); err != nil {
 		return err
 	}
