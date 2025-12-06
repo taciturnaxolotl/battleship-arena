@@ -29,13 +29,9 @@ const (
 	fieldLink
 )
 
-var titleStyle = lipgloss.NewStyle().
-	Bold(true).
-	Foreground(lipgloss.Color("205")).
-	MarginTop(1).
-	MarginBottom(1)
-
 type model struct {
+	renderer       *lipgloss.Renderer
+	titleStyle     lipgloss.Style
 	username       string
 	width          int
 	height         int
@@ -53,7 +49,7 @@ type model struct {
 	saveMessage    string
 }
 
-func InitialModel(username string, width, height int) model {
+func InitialModel(username string, width, height int, renderer *lipgloss.Renderer) model {
 	externalURL := os.Getenv("BATTLESHIP_EXTERNAL_URL")
 	if externalURL == "" {
 		externalURL = "localhost"
@@ -74,7 +70,16 @@ func InitialModel(username string, width, height int) model {
 	// Load user profile
 	user, _ := storage.GetUserByUsername(username)
 	
+	// Create styles using session renderer
+	titleStyle := renderer.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("205")).
+		MarginTop(1).
+		MarginBottom(1)
+	
 	return model{
+		renderer:     renderer,
+		titleStyle:   titleStyle,
 		username:     username,
 		width:        width,
 		height:       height,
@@ -200,14 +205,14 @@ func (m model) updateEditProfile(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) View() string {
 	var b strings.Builder
 
-	title := titleStyle.Render("🚢 Battleship Arena")
+	title := m.titleStyle.Render("🚢 Battleship Arena")
 	b.WriteString(title + "\n")
 	
 	// Skip tabs if in edit mode
 	if m.currentView != viewEditProfile {
 		// Navigation tabs
-		tabStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-		activeTabStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true)
+		tabStyle := m.renderer.NewStyle().Foreground(lipgloss.Color("240"))
+		activeTabStyle := m.renderer.NewStyle().Foreground(lipgloss.Color("86")).Bold(true)
 		
 		tabs := []string{"[h] Home", "[l] Leaderboard", "[p] Profile"}
 		for i, tab := range tabs {
@@ -248,13 +253,13 @@ func (m model) renderHome() string {
 	b.WriteString(fmt.Sprintf("User: %s\n\n", m.username))
 
 	// Upload instructions
-	infoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("86"))
+	infoStyle := m.renderer.NewStyle().Foreground(lipgloss.Color("86"))
 	b.WriteString(infoStyle.Render(fmt.Sprintf("Upload via: scp -P %s memory_functions_yourname.cpp %s@%s:~/", m.sshPort, m.username, m.externalURL)))
 	b.WriteString("\n\n")
 
 	// Show submissions
 	if len(m.submissions) > 0 {
-		b.WriteString(renderSubmissions(m.submissions))
+		b.WriteString(m.renderSubmissions(m.submissions))
 	} else {
 		b.WriteString("No submissions yet. Upload your first AI!\n")
 	}
@@ -264,7 +269,7 @@ func (m model) renderHome() string {
 
 func (m model) renderLeaderboardView() string {
 	if len(m.leaderboard) > 0 {
-		return renderLeaderboard(m.leaderboard)
+		return m.renderLeaderboard(m.leaderboard)
 	}
 	return "Loading leaderboard..."
 }
@@ -276,21 +281,21 @@ func (m model) renderProfile() string {
 		return "Loading profile..."
 	}
 	
-	b.WriteString(lipgloss.NewStyle().Bold(true).Render("👤 Profile") + "\n\n")
+	b.WriteString(m.renderer.NewStyle().Bold(true).Render("👤 Profile") + "\n\n")
 	
 	// Show user info
-	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	labelStyle := m.renderer.NewStyle().Foreground(lipgloss.Color("240"))
 	b.WriteString(labelStyle.Render("Username: ") + m.user.Username + "\n")
 	b.WriteString(labelStyle.Render("Name: ") + m.user.Name + "\n")
 	b.WriteString(labelStyle.Render("Bio: ") + m.user.Bio + "\n")
 	b.WriteString(labelStyle.Render("Link: ") + m.user.Link + "\n\n")
 	
-	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("86"))
+	hintStyle := m.renderer.NewStyle().Foreground(lipgloss.Color("86"))
 	b.WriteString(hintStyle.Render("Press 'e' to edit profile") + "\n\n")
 	
 	// Show user stats from submissions
 	if len(m.submissions) > 0 {
-		b.WriteString(renderSubmissions(m.submissions))
+		b.WriteString(m.renderSubmissions(m.submissions))
 		b.WriteString("\n")
 	}
 	
@@ -300,10 +305,10 @@ func (m model) renderProfile() string {
 func (m model) renderEditProfile() string {
 	var b strings.Builder
 	
-	b.WriteString(lipgloss.NewStyle().Bold(true).Render("✏️  Edit Profile") + "\n\n")
+	b.WriteString(m.renderer.NewStyle().Bold(true).Render("✏️  Edit Profile") + "\n\n")
 	
-	activeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true)
-	inactiveStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	activeStyle := m.renderer.NewStyle().Foreground(lipgloss.Color("86")).Bold(true)
+	inactiveStyle := m.renderer.NewStyle().Foreground(lipgloss.Color("240"))
 	
 	// Name field
 	if m.editingField == fieldName {
@@ -329,11 +334,11 @@ func (m model) renderEditProfile() string {
 	b.WriteString("\n")
 	
 	if m.saveMessage != "" {
-		msgStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("green"))
+		msgStyle := m.renderer.NewStyle().Foreground(lipgloss.Color("green"))
 		b.WriteString(msgStyle.Render(m.saveMessage) + "\n\n")
 	}
 	
-	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	hintStyle := m.renderer.NewStyle().Foreground(lipgloss.Color("240"))
 	b.WriteString(hintStyle.Render("Tab/↑↓: Navigate fields | Enter: Save | Esc: Cancel"))
 	
 	return b.String()
@@ -387,11 +392,11 @@ func tickCmd() tea.Cmd {
 	})
 }
 
-func renderSubmissions(submissions []storage.Submission) string {
+func (m model) renderSubmissions(submissions []storage.Submission) string {
 	var b strings.Builder
-	b.WriteString(lipgloss.NewStyle().Bold(true).Render("📤 Your Submissions") + "\n\n")
+	b.WriteString(m.renderer.NewStyle().Bold(true).Render("📤 Your Submissions") + "\n\n")
 
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("240"))
+	headerStyle := m.renderer.NewStyle().Bold(true).Foreground(lipgloss.Color("240"))
 	b.WriteString(headerStyle.Render(fmt.Sprintf("%-35s %-15s %s",
 		"Filename", "Uploaded", "Status")) + "\n")
 
@@ -414,7 +419,7 @@ func renderSubmissions(submissions []storage.Submission) string {
 		
 		// Build the line manually to avoid formatting issues with ANSI codes
 		line := fmt.Sprintf("%-35s %-15s ", sub.Filename, relTime)
-		statusStyled := lipgloss.NewStyle().Foreground(lipgloss.Color(statusColor)).Render(sub.Status)
+		statusStyled := m.renderer.NewStyle().Foreground(lipgloss.Color(statusColor)).Render(sub.Status)
 		b.WriteString(line + statusStyled + "\n")
 	}
 
@@ -436,13 +441,13 @@ func formatRelativeTime(t time.Time) string {
 	return fmt.Sprintf("%dd ago", days)
 }
 
-func renderLeaderboard(entries []storage.LeaderboardEntry) string {
+func (m model) renderLeaderboard(entries []storage.LeaderboardEntry) string {
 	if len(entries) == 0 {
 		return "No entries yet"
 	}
 
 	var b strings.Builder
-	b.WriteString(lipgloss.NewStyle().Bold(true).Render("🏆 Leaderboard") + "\n\n")
+	b.WriteString(m.renderer.NewStyle().Bold(true).Render("🏆 Leaderboard") + "\n\n")
 
 	// Header without styling on the whole line
 	b.WriteString(fmt.Sprintf("%-4s %-20s %11s %8s %8s %10s %10s\n", 
@@ -454,11 +459,11 @@ func renderLeaderboard(entries []storage.LeaderboardEntry) string {
 		// Apply color only to the rank and pad manually
 		var displayRank string
 		if i == 0 {
-			displayRank = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Render(rank) + "  " // Gold
+			displayRank = m.renderer.NewStyle().Foreground(lipgloss.Color("220")).Render(rank) + "  " // Gold
 		} else if i == 1 {
-			displayRank = lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Render(rank) + "  " // Silver
+			displayRank = m.renderer.NewStyle().Foreground(lipgloss.Color("250")).Render(rank) + "  " // Silver
 		} else if i == 2 {
-			displayRank = lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Render(rank) + "  " // Bronze
+			displayRank = m.renderer.NewStyle().Foreground(lipgloss.Color("208")).Render(rank) + "  " // Bronze
 		} else {
 			displayRank = fmt.Sprintf("%-4s", rank)
 		}
@@ -472,7 +477,7 @@ func renderLeaderboard(entries []storage.LeaderboardEntry) string {
 	return b.String()
 }
 
-func renderMatches(matches []storage.MatchResult, username string) string {
+func (m model) renderMatches(matches []storage.MatchResult, username string) string {
 	var b strings.Builder
 	
 	// Filter to show only matches involving this user
@@ -493,7 +498,7 @@ func renderMatches(matches []storage.MatchResult, username string) string {
 		userMatches = userMatches[:limit]
 	}
 	
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("240"))
+	headerStyle := m.renderer.NewStyle().Bold(true).Foreground(lipgloss.Color("240"))
 	b.WriteString(headerStyle.Render(fmt.Sprintf("%-20s %-20s %-20s %10s\n",
 		"Player 1", "Player 2", "Winner", "Avg Moves")))
 	b.WriteString("\n")
@@ -504,7 +509,7 @@ func renderMatches(matches []storage.MatchResult, username string) string {
 		
 		// Highlight wins in green, losses in red
 		if match.WinnerUsername == username {
-			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("green")).Render(line))
+			b.WriteString(m.renderer.NewStyle().Foreground(lipgloss.Color("green")).Render(line))
 		} else {
 			b.WriteString(line)
 		}
@@ -513,9 +518,9 @@ func renderMatches(matches []storage.MatchResult, username string) string {
 	return b.String()
 }
 
-func renderBracket(matches []storage.MatchResult) string {
+func (m model) renderBracket(matches []storage.MatchResult) string {
 	var b strings.Builder
-	b.WriteString(lipgloss.NewStyle().Bold(true).Render("⚔️  Tournament Bracket") + "\n\n")
+	b.WriteString(m.renderer.NewStyle().Bold(true).Render("⚔️  Tournament Bracket") + "\n\n")
 
 	if len(matches) == 0 {
 		return b.String()
@@ -542,9 +547,9 @@ func renderBracket(matches []storage.MatchResult) string {
 		}
 		
 		// Determine winner styling
-		player1Style := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-		player2Style := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-		winnerBox := lipgloss.NewStyle().
+		player1Style := m.renderer.NewStyle().Foreground(lipgloss.Color("240"))
+		player2Style := m.renderer.NewStyle().Foreground(lipgloss.Color("240"))
+		winnerBox := m.renderer.NewStyle().
 			Foreground(lipgloss.Color("green")).
 			Bold(true).
 			Border(lipgloss.RoundedBorder()).
@@ -564,12 +569,12 @@ func renderBracket(matches []storage.MatchResult) string {
 		//          ├── Winner
 		// Player2  ┘
 		
-		player1Box := lipgloss.NewStyle().
+		player1Box := m.renderer.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			Padding(0, 1).
 			Width(15)
 		
-		player2Box := lipgloss.NewStyle().
+		player2Box := m.renderer.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			Padding(0, 1).
 			Width(15)
@@ -584,7 +589,7 @@ func renderBracket(matches []storage.MatchResult) string {
 		b.WriteString(p1 + connector1 + "\n")
 		b.WriteString(strings.Repeat(" ", 17) + middle + " " + winnerStr + "\n")
 		b.WriteString(p2 + connector2 + "\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(
+		b.WriteString(m.renderer.NewStyle().Foreground(lipgloss.Color("240")).Render(
 			fmt.Sprintf("                        (avg %d moves)\n", match.AvgMoves)))
 		b.WriteString("\n")
 		
@@ -592,7 +597,7 @@ func renderBracket(matches []storage.MatchResult) string {
 	}
 
 	if len(matchups) > 8 {
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(
+		b.WriteString(m.renderer.NewStyle().Foreground(lipgloss.Color("240")).Render(
 			fmt.Sprintf("... and %d more matches\n", len(matchups)-8)))
 	}
 

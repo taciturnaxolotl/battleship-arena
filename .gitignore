@@ -6,6 +6,7 @@ bin
 build/
 
 ./battleship-arena
+./remote-submissions
 
 # Generated files in engine
 battleship-engine/src/memory_functions_*.cpp

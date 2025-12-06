@@ -11,7 +11,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/ssh"
 	"github.com/charmbracelet/wish"
 	"github.com/charmbracelet/wish/bubbletea"
@@ -145,6 +144,9 @@ func teaHandler(s ssh.Session) (tea.Model, []tea.ProgramOption) {
 	// Get proper terminal options for color support
 	opts := bubbletea.MakeOptions(s)
 	
+	// Create renderer for this session
+	renderer := bubbletea.MakeRenderer(s)
+	
 	if needsOnboarding {
 		// Run onboarding first
 		publicKey := ""
@@ -152,11 +154,11 @@ func teaHandler(s ssh.Session) (tea.Model, []tea.ProgramOption) {
 			publicKey = val.(string)
 		}
 		
-		m := tui.NewOnboardingModel(s.User(), publicKey, pty.Window.Width, pty.Window.Height)
+		m := tui.NewOnboardingModel(s.User(), publicKey, pty.Window.Width, pty.Window.Height, renderer)
 		return m, opts
 	}
 
-	m := tui.InitialModel(s.User(), pty.Window.Width, pty.Window.Height)
+	m := tui.InitialModel(s.User(), pty.Window.Width, pty.Window.Height, renderer)
 	return m, opts
 }
 
@@ -174,8 +176,4 @@ func initStorage(cfg Config) error {
 	return nil
 }
 
-var titleStyle = lipgloss.NewStyle().
-	Bold(true).
-	Foreground(lipgloss.Color("205")).
-	MarginTop(1).
-	MarginBottom(1)
+

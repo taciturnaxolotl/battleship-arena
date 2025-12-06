@@ -12,6 +12,7 @@ import (
 )
 
 type OnboardingModel struct {
+	renderer  *lipgloss.Renderer
 	username  string
 	publicKey string
 	step      int // 0=name, 1=bio, 2=link, 3=done
@@ -29,8 +30,9 @@ type onboardingCompleteMsg struct {
 	username string
 }
 
-func NewOnboardingModel(username, publicKey string, width, height int) OnboardingModel {
+func NewOnboardingModel(username, publicKey string, width, height int, renderer *lipgloss.Renderer) OnboardingModel {
 	return OnboardingModel{
+		renderer:  renderer,
 		username:  username,
 		publicKey: publicKey,
 		step:      0,
@@ -98,7 +100,7 @@ func (m OnboardingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 	case onboardingCompleteMsg:
 		// Transition to main model
-		mainModel := InitialModel(m.username, m.width, m.height)
+		mainModel := InitialModel(m.username, m.width, m.height, m.renderer)
 		return mainModel, mainModel.Init()
 	}
 	return m, nil
@@ -106,7 +108,7 @@ func (m OnboardingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m OnboardingModel) View() string {
 	if m.completed {
-		successStyle := lipgloss.NewStyle().
+		successStyle := m.renderer.NewStyle().
 			Foreground(lipgloss.Color("green")).
 			Bold(true)
 		return successStyle.Render("\n✅ Account created successfully!\n\nLoading dashboard...\n")
@@ -114,23 +116,23 @@ func (m OnboardingModel) View() string {
 	
 	var b strings.Builder
 	
-	titleStyle := lipgloss.NewStyle().
+	titleStyle := m.renderer.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("205")).
 		MarginTop(1).
 		MarginBottom(1)
 	
-	promptStyle := lipgloss.NewStyle().
+	promptStyle := m.renderer.NewStyle().
 		Foreground(lipgloss.Color("86"))
 	
-	inputStyle := lipgloss.NewStyle().
+	inputStyle := m.renderer.NewStyle().
 		Foreground(lipgloss.Color("212")).
 		Bold(true)
 	
-	errorStyle := lipgloss.NewStyle().
+	errorStyle := m.renderer.NewStyle().
 		Foreground(lipgloss.Color("196"))
 	
-	helpStyle := lipgloss.NewStyle().
+	helpStyle := m.renderer.NewStyle().
 		Foreground(lipgloss.Color("240"))
 	
 	b.WriteString(titleStyle.Render("🚢 Welcome to Battleship Arena!"))
