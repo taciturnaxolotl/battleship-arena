@@ -18,6 +18,15 @@ const (
 	viewHome viewMode = iota
 	viewLeaderboard
 	viewProfile
+	viewEditProfile
+)
+
+type profileField int
+
+const (
+	fieldName profileField = iota
+	fieldBio
+	fieldLink
 )
 
 var titleStyle = lipgloss.NewStyle().
@@ -27,15 +36,21 @@ var titleStyle = lipgloss.NewStyle().
 	MarginBottom(1)
 
 type model struct {
-	username     string
-	width        int
-	height       int
-	submissions  []storage.Submission
-	leaderboard  []storage.LeaderboardEntry
-	matches      []storage.MatchResult
-	externalURL  string
-	sshPort      string
-	currentView  viewMode
+	username       string
+	width          int
+	height         int
+	submissions    []storage.Submission
+	leaderboard    []storage.LeaderboardEntry
+	matches        []storage.MatchResult
+	externalURL    string
+	sshPort        string
+	currentView    viewMode
+	user           *storage.User
+	editingField   profileField
+	nameInput      string
+	bioInput       string
+	linkInput      string
+	saveMessage    string
 }
 
 func InitialModel(username string, width, height int) model {
@@ -56,15 +71,20 @@ func InitialModel(username string, width, height int) model {
 		sshPort = "2222"
 	}
 	
+	// Load user profile
+	user, _ := storage.GetUserByUsername(username)
+	
 	return model{
-		username:    username,
-		width:       width,
-		height:      height,
-		submissions: []storage.Submission{},
-		leaderboard: []storage.LeaderboardEntry{},
-		externalURL: externalURL,
-		sshPort:     sshPort,
-		currentView: viewHome,
+		username:     username,
+		width:        width,
+		height:       height,
+		submissions:  []storage.Submission{},
+		leaderboard:  []storage.LeaderboardEntry{},
+		externalURL:  externalURL,
+		sshPort:      sshPort,
+		currentView:  viewHome,
+		user:         user,
+		editingField: fieldName,
 	}
 }
 
@@ -75,6 +95,10 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.currentView == viewEditProfile {
+			return m.updateEditProfile(msg)
+		}
+		
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
@@ -84,6 +108,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentView = viewLeaderboard
 		case "p", "3":
 			m.currentView = viewProfile
+		case "e":
+			if m.currentView == viewProfile {
+				m.currentView = viewEditProfile
+				// Initialize inputs with current values
+				if m.user != nil {
+					m.nameInput = m.user.Name
+					m.bioInput = m.user.Bio
+					m.linkInput = m.user.Link
+				}
+				m.editingField = fieldName
+				m.saveMessage = ""
+			}
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -100,6 +136,65 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) updateEditProfile(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c", "q", "esc":
+		m.currentView = viewProfile
+		m.saveMessage = ""
+		return m, nil
+	case "tab", "down":
+		m.editingField = (m.editingField + 1) % 3
+	case "shift+tab", "up":
+		m.editingField = (m.editingField + 2) % 3
+	case "enter":
+		// Save profile
+		err := storage.UpdateUserProfile(m.username, m.nameInput, m.bioInput, m.linkInput)
+		if err != nil {
+			m.saveMessage = "Error saving profile"
+		} else {
+			m.saveMessage = "Profile saved!"
+			// Reload user
+			m.user, _ = storage.GetUserByUsername(m.username)
+			m.currentView = viewProfile
+		}
+		return m, nil
+	case "backspace":
+		switch m.editingField {
+		case fieldName:
+			if len(m.nameInput) > 0 {
+				m.nameInput = m.nameInput[:len(m.nameInput)-1]
+			}
+		case fieldBio:
+			if len(m.bioInput) > 0 {
+				m.bioInput = m.bioInput[:len(m.bioInput)-1]
+			}
+		case fieldLink:
+			if len(m.linkInput) > 0 {
+				m.linkInput = m.linkInput[:len(m.linkInput)-1]
+			}
+		}
+	default:
+		// Add character to current field
+		if len(msg.String()) == 1 {
+			switch m.editingField {
+			case fieldName:
+				if len(m.nameInput) < 50 {
+					m.nameInput += msg.String()
+				}
+			case fieldBio:
+				if len(m.bioInput) < 200 {
+					m.bioInput += msg.String()
+				}
+			case fieldLink:
+				if len(m.linkInput) < 100 {
+					m.linkInput += msg.String()
+				}
+			}
+		}
+	}
+	return m, nil
+}
+
 
 
 func (m model) View() string {
@@ -108,22 +203,25 @@ func (m model) View() string {
 	title := titleStyle.Render("🚢 Battleship Arena")
 	b.WriteString(title + "\n")
 	
-	// Navigation tabs
-	tabStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	activeTabStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true)
-	
-	tabs := []string{"[h] Home", "[l] Leaderboard", "[p] Profile"}
-	for i, tab := range tabs {
-		if viewMode(i) == m.currentView {
-			b.WriteString(activeTabStyle.Render(tab))
-		} else {
-			b.WriteString(tabStyle.Render(tab))
+	// Skip tabs if in edit mode
+	if m.currentView != viewEditProfile {
+		// Navigation tabs
+		tabStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+		activeTabStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true)
+		
+		tabs := []string{"[h] Home", "[l] Leaderboard", "[p] Profile"}
+		for i, tab := range tabs {
+			if viewMode(i) == m.currentView {
+				b.WriteString(activeTabStyle.Render(tab))
+			} else {
+				b.WriteString(tabStyle.Render(tab))
+			}
+			if i < len(tabs)-1 {
+				b.WriteString("  ")
+			}
 		}
-		if i < len(tabs)-1 {
-			b.WriteString("  ")
-		}
+		b.WriteString("\n\n")
 	}
-	b.WriteString("\n\n")
 
 	// Render content based on current view
 	switch m.currentView {
@@ -133,9 +231,13 @@ func (m model) View() string {
 		b.WriteString(m.renderLeaderboardView())
 	case viewProfile:
 		b.WriteString(m.renderProfile())
+	case viewEditProfile:
+		b.WriteString(m.renderEditProfile())
 	}
 
-	b.WriteString("\n\nPress q to quit")
+	if m.currentView != viewEditProfile {
+		b.WriteString("\n\nPress q to quit")
+	}
 
 	return b.String()
 }
@@ -170,7 +272,21 @@ func (m model) renderLeaderboardView() string {
 func (m model) renderProfile() string {
 	var b strings.Builder
 	
-	b.WriteString(fmt.Sprintf("Profile: %s\n\n", m.username))
+	if m.user == nil {
+		return "Loading profile..."
+	}
+	
+	b.WriteString(lipgloss.NewStyle().Bold(true).Render("👤 Profile") + "\n\n")
+	
+	// Show user info
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	b.WriteString(labelStyle.Render("Username: ") + m.user.Username + "\n")
+	b.WriteString(labelStyle.Render("Name: ") + m.user.Name + "\n")
+	b.WriteString(labelStyle.Render("Bio: ") + m.user.Bio + "\n")
+	b.WriteString(labelStyle.Render("Link: ") + m.user.Link + "\n\n")
+	
+	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("86"))
+	b.WriteString(hintStyle.Render("Press 'e' to edit profile") + "\n\n")
 	
 	// Show user stats from submissions
 	if len(m.submissions) > 0 {
@@ -178,11 +294,47 @@ func (m model) renderProfile() string {
 		b.WriteString("\n")
 	}
 	
-	// Show recent matches involving this user
-	if len(m.matches) > 0 {
-		b.WriteString("\nRecent Matches:\n")
-		b.WriteString(renderMatches(m.matches, m.username))
+	return b.String()
+}
+
+func (m model) renderEditProfile() string {
+	var b strings.Builder
+	
+	b.WriteString(lipgloss.NewStyle().Bold(true).Render("✏️  Edit Profile") + "\n\n")
+	
+	activeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true)
+	inactiveStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	
+	// Name field
+	if m.editingField == fieldName {
+		b.WriteString(activeStyle.Render("► Name: ") + m.nameInput + "█\n")
+	} else {
+		b.WriteString(inactiveStyle.Render("  Name: ") + m.nameInput + "\n")
 	}
+	
+	// Bio field
+	if m.editingField == fieldBio {
+		b.WriteString(activeStyle.Render("► Bio: ") + m.bioInput + "█\n")
+	} else {
+		b.WriteString(inactiveStyle.Render("  Bio: ") + m.bioInput + "\n")
+	}
+	
+	// Link field
+	if m.editingField == fieldLink {
+		b.WriteString(activeStyle.Render("► Link: ") + m.linkInput + "█\n")
+	} else {
+		b.WriteString(inactiveStyle.Render("  Link: ") + m.linkInput + "\n")
+	}
+	
+	b.WriteString("\n")
+	
+	if m.saveMessage != "" {
+		msgStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("green"))
+		b.WriteString(msgStyle.Render(m.saveMessage) + "\n\n")
+	}
+	
+	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	b.WriteString(hintStyle.Render("Tab/↑↓: Navigate fields | Enter: Save | Esc: Cancel"))
 	
 	return b.String()
 }

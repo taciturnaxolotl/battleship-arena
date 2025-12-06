@@ -96,6 +96,14 @@ func UpdateUserLastLogin(username string) error {
 	return err
 }
 
+func UpdateUserProfile(username, name, bio, link string) error {
+	_, err := DB.Exec(
+		"UPDATE users SET name = ?, bio = ?, link = ? WHERE username = ?",
+		name, bio, link, username,
+	)
+	return err
+}
+
 func GetAllUsers() ([]User, error) {
 	rows, err := DB.Query(
 		`SELECT id, username, name, bio, link, public_key, created_at, last_login_at 
