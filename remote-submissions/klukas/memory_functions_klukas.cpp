@@ -1,3 +1,4 @@
+#include "battleship.h"
 #include "memory_functions_klukas.h"
 #include "kasbs.h"
 #include "memory.h"

@@ -367,7 +367,6 @@ func parseFunctionNames(cppContent string) (string, error) {
 
 func generateHeader(filename, prefix string) string {
 	guard := strings.ToUpper(strings.Replace(filename, ".", "_", -1))
-	functionSuffix := strings.ToUpper(prefix[0:1]) + prefix[1:]
 	
 	return fmt.Sprintf(`#ifndef %s
 #define %s
@@ -381,7 +380,7 @@ std::string smartMove%s(const ComputerMemory &memory);
 void updateMemory%s(int row, int col, int result, ComputerMemory &memory);
 
 #endif
-`, guard, guard, functionSuffix, functionSuffix, functionSuffix)
+`, guard, guard, prefix, prefix, prefix)
 }
 
 func generateMatchMain(prefix1, prefix2, suffix1, suffix2 string) string {
