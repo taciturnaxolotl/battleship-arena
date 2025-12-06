@@ -45,6 +45,7 @@ func runSandboxed(ctx context.Context, name string, args []string, timeoutSec in
 		"--property=PrivateNetwork=true",   // Isolate network (no internet)
 		"--property=PrivateTmp=true",       // Private /tmp
 		"--property=NoNewPrivileges=true",  // Prevent privilege escalation
+		"--property=ReadWritePaths=/var/lib/battleship-arena",  // Allow writes to battleship directory
 		"--",
 	}
 	systemdArgs = append(systemdArgs, args...)
