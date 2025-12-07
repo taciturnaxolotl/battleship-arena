@@ -310,6 +310,13 @@ func RunRoundRobinMatches(newSub storage.Submission, uploadDir string, broadcast
 		
 		player1Wins, player2Wins, totalMoves := RunHeadToHead(newSub, opponent, 1000)
 		
+		// If match failed (returned 0-0-0), mark submission as compilation_failed
+		if player1Wins == 0 && player2Wins == 0 && totalMoves == 0 {
+			log.Printf("❌ Match failed for %s vs %s - marking as compilation_failed", newSub.Username, opponent.Username)
+			storage.UpdateSubmissionStatus(newSub.ID, "compilation_failed")
+			return
+		}
+		
 		var winnerID int
 		avgMoves := totalMoves / 1000
 		

@@ -797,6 +797,10 @@ func RecalculateAllGlicko2Ratings() error {
 			}
 			
 			totalGames := myWins + opponentWins
+			// Skip match pairs with no games played (prevents NaN from 0/0)
+			if totalGames == 0 {
+				continue
+			}
 			score := float64(myWins) / float64(totalGames)
 			
 			results = append(results, Glicko2Result{
