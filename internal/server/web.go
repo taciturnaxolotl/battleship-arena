@@ -527,6 +527,7 @@ const leaderboardHTML = `
         
         .collapsible-section {
             margin-top: 2rem;
+            margin-bottom: 2rem;
             background: #1e293b;
             border: 1px solid #334155;
             border-radius: 0.75rem;

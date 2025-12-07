@@ -31,6 +31,21 @@ func runSandboxed(ctx context.Context, name string, args []string, timeoutSec in
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 	
+	// Check if systemd-run is available (not on macOS/local dev)
+	_, err := exec.LookPath("systemd-run")
+	if err != nil {
+		// Fallback: run directly without sandbox (development only)
+		log.Printf("systemd-run not available, running without sandbox: %v", args)
+		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+		output, err := cmd.CombinedOutput()
+		
+		if ctx.Err() == context.DeadlineExceeded {
+			return output, fmt.Errorf("command timed out after %d seconds", timeoutSec)
+		}
+		
+		return output, err
+	}
+	
 	// Build systemd-run command with security properties
 	// Using service unit (not scope) to get access to network/filesystem isolation
 	systemdArgs := []string{
@@ -64,6 +79,44 @@ func runSandboxed(ctx context.Context, name string, args []string, timeoutSec in
 	// Check for timeout
 	if ctx.Err() == context.DeadlineExceeded {
 		return output, fmt.Errorf("command timed out after %d seconds", timeoutSec)
+	}
+	
+	// Check if process was killed by a signal
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
+				// Direct execution: check if signaled
+				if status.Signaled() {
+					sig := status.Signal()
+					return output, fmt.Errorf("killed by signal: %s", sig.String())
+				}
+				// systemd-run execution: exit code 128+N means killed by signal N
+				exitCode := status.ExitStatus()
+				if exitCode >= 128 && exitCode <= 192 {
+					sigNum := exitCode - 128
+					sigName := "unknown"
+					switch sigNum {
+					case 1: sigName = "SIGHUP"
+					case 2: sigName = "SIGINT"
+					case 3: sigName = "SIGQUIT"
+					case 4: sigName = "SIGILL"
+					case 5: sigName = "SIGTRAP"
+					case 6: sigName = "SIGABRT"
+					case 7: sigName = "SIGBUS"
+					case 8: sigName = "SIGFPE"
+					case 9: sigName = "SIGKILL"
+					case 10: sigName = "SIGUSR1"
+					case 11: sigName = "SIGSEGV"
+					case 12: sigName = "SIGUSR2"
+					case 13: sigName = "SIGPIPE"
+					case 14: sigName = "SIGALRM"
+					case 15: sigName = "SIGTERM"
+					default: sigName = fmt.Sprintf("signal %d", sigNum)
+					}
+					return output, fmt.Errorf("killed by %s (exit code %d)", sigName, exitCode)
+				}
+			}
+		}
 	}
 	
 	return output, err
@@ -231,7 +284,13 @@ func RunHeadToHead(player1, player2 storage.Submission, numGames int) (int, int,
 	output, err = runSandboxed(context.Background(), "run-match", runArgs, 300)
 	if err != nil {
 		log.Printf("Match execution failed: %v\n%s", err, output)
-		return 0, 0, 0, fmt.Sprintf("Runtime error: %s (possible crash, timeout, or infinite loop)", strings.TrimSpace(string(output)))
+		errMsg := strings.TrimSpace(string(output))
+		if errMsg != "" {
+			// If there's output, show it along with the exit status
+			return 0, 0, 0, fmt.Sprintf("Runtime error: %s (%s)", errMsg, err.Error())
+		}
+		// If no output, just show the error
+		return 0, 0, 0, fmt.Sprintf("Runtime error: %s", err.Error())
 	}
 	
 	p1, p2, moves := parseMatchOutput(string(output))
