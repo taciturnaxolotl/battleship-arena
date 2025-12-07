@@ -525,6 +525,61 @@ const leaderboardHTML = `
             flex-shrink: 0;
         }
         
+        .collapsible-section {
+            margin-top: 2rem;
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 0.75rem;
+            overflow: hidden;
+        }
+        
+        .collapsible-header {
+            padding: 1rem 1.5rem;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #1e293b;
+            border-bottom: 1px solid #334155;
+            transition: background 0.2s;
+        }
+        
+        .collapsible-header:hover {
+            background: #334155;
+        }
+        
+        .collapsible-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #e2e8f0;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .collapsible-count {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.375rem;
+            font-size: 0.875rem;
+        }
+        
+        .collapsible-arrow {
+            transition: transform 0.2s;
+            color: #94a3b8;
+        }
+        
+        .collapsible-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+        }
+        
+        .collapsible-content.open {
+            max-height: 1000px;
+        }
+        
         @media (max-width: 768px) {
             h1 { font-size: 2rem; }
             .subtitle { font-size: 1rem; }
@@ -703,6 +758,19 @@ const leaderboardHTML = `
                 console.error('Failed to copy:', err);
             });
         }
+        
+        function toggleCollapsible() {
+            const content = document.getElementById('collapsible-content');
+            const arrow = document.getElementById('collapsible-arrow');
+            
+            if (content.classList.contains('open')) {
+                content.classList.remove('open');
+                arrow.textContent = '▼';
+            } else {
+                content.classList.add('open');
+                arrow.textContent = '▲';
+            }
+        }
     </script>
 </head>
 <body>
@@ -748,15 +816,15 @@ const leaderboardHTML = `
                 <tbody>
                     {{if .Entries}}
                     {{range $i, $e := .Entries}}
-                    <tr{{if $e.IsPending}} class="pending"{{else if $e.IsBroken}} class="broken"{{end}}>
-                        <td class="rank rank-{{add $i 1}}">{{if $e.IsBroken}}💥{{else if $e.IsPending}}⏳{{else if lt $i 3}}{{medal $i}}{{else}}{{add $i 1}}{{end}}</td>
-                        <td class="player-name"><a href="/user/{{$e.Username}}" style="color: inherit; text-decoration: none;">{{$e.Username}}{{if $e.IsPending}} <span style="font-size: 0.8em;">(pending)</span>{{else if $e.IsBroken}} <span style="font-size: 0.8em; color: #ef4444;" title="{{$e.FailureMessage}}">(failed)</span>{{end}}</a></td>
-                        <td>{{if or $e.IsPending $e.IsBroken}}-{{else}}<strong>{{$e.Rating}}</strong> <span style="color: #94a3b8; font-size: 0.85em;">±{{$e.RD}}</span>{{end}}</td>
-                        <td>{{if or $e.IsPending $e.IsBroken}}-{{else}}{{$e.Wins}}{{end}}</td>
-                        <td>{{if or $e.IsPending $e.IsBroken}}-{{else}}{{$e.Losses}}{{end}}</td>
-                        <td>{{if or $e.IsPending $e.IsBroken}}-{{else}}<span class="win-rate {{winRateClass $e}}">{{winRate $e}}%</span>{{end}}</td>
-                        <td>{{if or $e.IsPending $e.IsBroken}}-{{else}}{{printf "%.1f" $e.AvgMoves}}{{end}}</td>
-                        <td style="color: #64748b;">{{if $e.IsPending}}Waiting...{{else if $e.IsBroken}}<span title="{{$e.FailureMessage}}">Failed</span>{{else}}{{$e.LastPlayed.Format "Jan 2, 3:04 PM"}}{{end}}</td>
+                    <tr{{if $e.IsPending}} class="pending"{{end}}>
+                        <td class="rank rank-{{add $i 1}}">{{if $e.IsPending}}⏳{{else if lt $i 3}}{{medal $i}}{{else}}{{add $i 1}}{{end}}</td>
+                        <td class="player-name"><a href="/user/{{$e.Username}}" style="color: inherit; text-decoration: none;">{{$e.Username}}{{if $e.IsPending}} <span style="font-size: 0.8em;">(pending)</span>{{end}}</a></td>
+                        <td>{{if $e.IsPending}}-{{else}}<strong>{{$e.Rating}}</strong> <span style="color: #94a3b8; font-size: 0.85em;">±{{$e.RD}}</span>{{end}}</td>
+                        <td>{{if $e.IsPending}}-{{else}}{{$e.Wins}}{{end}}</td>
+                        <td>{{if $e.IsPending}}-{{else}}{{$e.Losses}}{{end}}</td>
+                        <td>{{if $e.IsPending}}-{{else}}<span class="win-rate {{winRateClass $e}}">{{winRate $e}}%</span>{{end}}</td>
+                        <td>{{if $e.IsPending}}-{{else}}{{printf "%.1f" $e.AvgMoves}}{{end}}</td>
+                        <td style="color: #64748b;">{{if $e.IsPending}}Waiting...{{else}}{{$e.LastPlayed.Format "Jan 2, 3:04 PM"}}{{end}}</td>
                     </tr>
                     {{end}}
                     {{else}}
@@ -772,6 +840,36 @@ const leaderboardHTML = `
                 </tbody>
             </table>
         </div>
+        
+        {{if .BrokenEntries}}
+        <div class="collapsible-section">
+            <div class="collapsible-header" onclick="toggleCollapsible()">
+                <div class="collapsible-title">
+                    💥 Failed Submissions
+                    <span class="collapsible-count">{{len .BrokenEntries}}</span>
+                </div>
+                <span class="collapsible-arrow" id="collapsible-arrow">▼</span>
+            </div>
+            <div class="collapsible-content" id="collapsible-content">
+                <table>
+                    <tbody>
+                        {{range $e := .BrokenEntries}}
+                        <tr class="broken">
+                            <td class="rank">💥</td>
+                            <td class="player-name"><a href="/user/{{$e.Username}}" style="color: inherit; text-decoration: none;">{{$e.Username}}</a></td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td style="color: #64748b;"><span title="{{$e.FailureMessage}}" style="cursor: help;">{{$e.FailureMessage}}</span></td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {{end}}
         
         <div class="info-card">
             <h3>📤 How to Submit</h3>
@@ -876,6 +974,17 @@ func HandleLeaderboard(w http.ResponseWriter, r *http.Request) {
 		entries = []storage.LeaderboardEntry{}
 	}
 
+	// Split entries into working and broken
+	var workingEntries []storage.LeaderboardEntry
+	var brokenEntries []storage.LeaderboardEntry
+	for _, e := range entries {
+		if e.IsBroken {
+			brokenEntries = append(brokenEntries, e)
+		} else {
+			workingEntries = append(workingEntries, e)
+		}
+	}
+
 	// Get matches for bracket
 	matches, err := storage.GetAllMatches()
 	if err != nil {
@@ -883,17 +992,19 @@ func HandleLeaderboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := struct {
-		Entries      []storage.LeaderboardEntry
-		Matches      []storage.MatchResult
-		TotalPlayers int
-		TotalGames   int
-		ServerURL    string
+		Entries        []storage.LeaderboardEntry
+		BrokenEntries  []storage.LeaderboardEntry
+		Matches        []storage.MatchResult
+		TotalPlayers   int
+		TotalGames     int
+		ServerURL      string
 	}{
-		Entries:      entries,
-		Matches:      matches,
-		TotalPlayers: len(entries),
-		TotalGames:   calculateTotalGames(entries),
-		ServerURL:    GetServerURL(),
+		Entries:        workingEntries,
+		BrokenEntries:  brokenEntries,
+		Matches:        matches,
+		TotalPlayers:   len(workingEntries),
+		TotalGames:     calculateTotalGames(workingEntries),
+		ServerURL:      GetServerURL(),
 	}
 
 	if err := tmpl.Execute(w, data); err != nil {
