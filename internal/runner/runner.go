@@ -135,13 +135,13 @@ func CompileSubmission(sub storage.Submission, uploadDir string) error {
 	return nil
 }
 
-func RunHeadToHead(player1, player2 storage.Submission, numGames int) (int, int, int) {
+func RunHeadToHead(player1, player2 storage.Submission, numGames int) (int, int, int, string) {
 	re := regexp.MustCompile(`memory_functions_(\w+)\.cpp`)
 	matches1 := re.FindStringSubmatch(player1.Filename)
 	matches2 := re.FindStringSubmatch(player2.Filename)
 	
 	if len(matches1) < 2 || len(matches2) < 2 {
-		return 0, 0, 0
+		return 0, 0, 0, "Invalid filename format"
 	}
 	
 	prefix1 := matches1[1]
@@ -153,36 +153,36 @@ func RunHeadToHead(player1, player2 storage.Submission, numGames int) (int, int,
 	// Ensure both files exist in engine/src (copy from uploads if missing)
 	if _, err := os.Stat(cpp1Path); os.IsNotExist(err) {
 		log.Printf("Player1 file missing in engine/src, skipping: %s", cpp1Path)
-		return 0, 0, 0
+		return 0, 0, 0, fmt.Sprintf("File missing: %s", cpp1Path)
 	}
 	
 	if _, err := os.Stat(cpp2Path); os.IsNotExist(err) {
 		log.Printf("Player2 file missing in engine/src, skipping: %s", cpp2Path)
-		return 0, 0, 0
+		return 0, 0, 0, fmt.Sprintf("Opponent file missing: %s", cpp2Path)
 	}
 	
 	cpp1Content, err := os.ReadFile(cpp1Path)
 	if err != nil {
 		log.Printf("Failed to read %s: %v", cpp1Path, err)
-		return 0, 0, 0
+		return 0, 0, 0, fmt.Sprintf("Failed to read file: %v", err)
 	}
 	
 	cpp2Content, err := os.ReadFile(cpp2Path)
 	if err != nil {
 		log.Printf("Failed to read %s: %v", cpp2Path, err)
-		return 0, 0, 0
+		return 0, 0, 0, fmt.Sprintf("Failed to read opponent file: %v", err)
 	}
 	
 	suffix1, err := parseFunctionNames(string(cpp1Content))
 	if err != nil {
 		log.Printf("Failed to parse function names for %s: %v", player1.Filename, err)
-		return 0, 0, 0
+		return 0, 0, 0, fmt.Sprintf("Could not find required function signatures (initMemory, smartMove, updateMemory)")
 	}
 	
 	suffix2, err := parseFunctionNames(string(cpp2Content))
 	if err != nil {
 		log.Printf("Failed to parse function names for %s: %v", player2.Filename, err)
-		return 0, 0, 0
+		return 0, 0, 0, fmt.Sprintf("Opponent file parse error: %v", err)
 	}
 	
 	buildDir := filepath.Join(enginePath, "build")
@@ -192,7 +192,7 @@ func RunHeadToHead(player1, player2 storage.Submission, numGames int) (int, int,
 	mainPath := filepath.Join(enginePath, "src", fmt.Sprintf("match_%s_vs_%s.cpp", prefix1, prefix2))
 	if err := os.WriteFile(mainPath, []byte(mainContent), 0644); err != nil {
 		log.Printf("Failed to write match main: %v", err)
-		return 0, 0, 0
+		return 0, 0, 0, fmt.Sprintf("Failed to write match file: %v", err)
 	}
 	
 	// Compile match binary in sandbox with 120 second timeout
@@ -215,7 +215,7 @@ func RunHeadToHead(player1, player2 storage.Submission, numGames int) (int, int,
 	output, err := runSandboxed(context.Background(), "compile-match", compileArgs, 120)
 	if err != nil {
 		log.Printf("Failed to compile match binary (err=%v): %s", err, output)
-		return 0, 0, 0
+		return 0, 0, 0, fmt.Sprintf("Compilation error: %s", string(output))
 	}
 	
 	log.Printf("Match compilation output: %s", output)
@@ -223,7 +223,7 @@ func RunHeadToHead(player1, player2 storage.Submission, numGames int) (int, int,
 	// Check if binary was actually created
 	if _, err := os.Stat(combinedBinary); os.IsNotExist(err) {
 		log.Printf("Match binary was not created at %s, compilation succeeded but no binary found", combinedBinary)
-		return 0, 0, 0
+		return 0, 0, 0, "Match binary not created after compilation"
 	}
 	
 	// Run match in sandbox with 300 second timeout (1000 games should be ~60s, give headroom)
@@ -231,10 +231,11 @@ func RunHeadToHead(player1, player2 storage.Submission, numGames int) (int, int,
 	output, err = runSandboxed(context.Background(), "run-match", runArgs, 300)
 	if err != nil {
 		log.Printf("Match execution failed: %v\n%s", err, output)
-		return 0, 0, 0
+		return 0, 0, 0, fmt.Sprintf("Runtime error: %s (possible crash, timeout, or infinite loop)", strings.TrimSpace(string(output)))
 	}
 	
-	return parseMatchOutput(string(output))
+	p1, p2, moves := parseMatchOutput(string(output))
+	return p1, p2, moves, ""
 }
 
 func RunRoundRobinMatches(newSub storage.Submission, uploadDir string, broadcastFunc func(string, int, int, time.Time, []string)) {
@@ -308,12 +309,12 @@ func RunRoundRobinMatches(newSub storage.Submission, uploadDir string, broadcast
 		queuedPlayers := storage.GetQueuedPlayerNames()
 		broadcastFunc(newSub.Username, matchNum, totalMatches, startTime, queuedPlayers)
 		
-		player1Wins, player2Wins, totalMoves := RunHeadToHead(newSub, opponent, 1000)
+		player1Wins, player2Wins, totalMoves, errMsg := RunHeadToHead(newSub, opponent, 1000)
 		
-		// If match failed (returned 0-0-0), mark submission as compilation_failed
+		// If match failed (returned 0-0-0), mark submission as match_failed with error message
 		if player1Wins == 0 && player2Wins == 0 && totalMoves == 0 {
-			log.Printf("❌ Match failed for %s vs %s - marking as compilation_failed", newSub.Username, opponent.Username)
-			storage.UpdateSubmissionStatus(newSub.ID, "compilation_failed")
+			log.Printf("❌ Match execution failed for %s vs %s - marking as match_failed", newSub.Username, opponent.Username)
+			storage.UpdateSubmissionStatusWithMessage(newSub.ID, "match_failed", errMsg)
 			return
 		}
 		

@@ -61,7 +61,7 @@ func ProcessSubmissions(uploadDir string, broadcastFunc func(string, int, int, t
 		
 		if err := CompileSubmission(sub, uploadDir); err != nil {
 			log.Printf("❌ Compilation failed for %s: %v", sub.Username, err)
-			storage.UpdateSubmissionStatus(sub.ID, "compilation_failed")
+			storage.UpdateSubmissionStatusWithMessage(sub.ID, "compilation_failed", err.Error())
 			notifyFunc()
 			continue
 		}

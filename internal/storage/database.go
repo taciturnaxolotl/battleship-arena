@@ -11,26 +11,28 @@ import (
 var DB *sql.DB
 
 type LeaderboardEntry struct {
-	Username   string
-	Wins       int
-	Losses     int
-	WinPct     float64
-	Rating     int
-	RD         int
-	AvgMoves   float64
-	Stage      string
-	LastPlayed time.Time
-	IsPending  bool
-	IsBroken   bool
+	Username       string
+	Wins           int
+	Losses         int
+	WinPct         float64
+	Rating         int
+	RD             int
+	AvgMoves       float64
+	Stage          string
+	LastPlayed     time.Time
+	IsPending      bool
+	IsBroken       bool
+	FailureMessage string
 }
 
 type Submission struct {
-	ID         int
-	Username   string
-	Filename   string
-	UploadTime time.Time
-	Status     string
-	IsActive   bool
+	ID             int
+	Username       string
+	Filename       string
+	UploadTime     time.Time
+	Status         string
+	IsActive       bool
+	FailureMessage string
 }
 
 type SubmissionWithStats struct {
@@ -112,7 +114,8 @@ func InitDB(path string) (*sql.DB, error) {
 		is_active BOOLEAN DEFAULT 1,
 		glicko_rating REAL DEFAULT 1500.0,
 		glicko_rd REAL DEFAULT 350.0,
-		glicko_volatility REAL DEFAULT 0.06
+		glicko_volatility REAL DEFAULT 0.06,
+		failure_message TEXT
 	);
 
 	CREATE TABLE IF NOT EXISTS tournaments (
@@ -204,10 +207,11 @@ func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		AVG(CASE WHEN m.player1_id = s.id THEN m.player1_moves ELSE m.player2_moves END) as avg_moves,
 		MAX(m.timestamp) as last_played,
 		0 as is_pending,
-		0 as is_broken
+		0 as is_broken,
+		'' as failure_message
 	FROM submissions s
 	LEFT JOIN matches m ON (m.player1_id = s.id OR m.player2_id = s.id) AND m.is_valid = 1
-	WHERE s.is_active = 1 AND s.status NOT IN ('compilation_failed')
+	WHERE s.is_active = 1 AND s.status NOT IN ('compilation_failed', 'match_failed')
 	GROUP BY s.username, s.glicko_rating, s.glicko_rd
 	HAVING COUNT(m.id) > 0
 	
@@ -222,7 +226,8 @@ func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		999.0 as avg_moves,
 		s.upload_time as last_played,
 		1 as is_pending,
-		0 as is_broken
+		0 as is_broken,
+		'' as failure_message
 	FROM submissions s
 	LEFT JOIN matches m ON (m.player1_id = s.id OR m.player2_id = s.id) AND m.is_valid = 1
 	WHERE s.is_active = 1 AND s.status IN ('pending', 'testing', 'completed')
@@ -240,9 +245,10 @@ func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		999.0 as avg_moves,
 		s.upload_time as last_played,
 		0 as is_pending,
-		1 as is_broken
+		1 as is_broken,
+		COALESCE(s.failure_message, '') as failure_message
 	FROM submissions s
-	WHERE s.is_active = 1 AND s.status = 'compilation_failed'
+	WHERE s.is_active = 1 AND s.status IN ('compilation_failed', 'match_failed')
 	
 	ORDER BY is_broken ASC, is_pending ASC, rating DESC, total_wins DESC, avg_moves ASC
 	LIMIT ?
@@ -260,7 +266,7 @@ func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		var lastPlayed string
 		var rating, rd float64
 		var isPending, isBroken int
-		err := rows.Scan(&e.Username, &rating, &rd, &e.Wins, &e.Losses, &e.AvgMoves, &lastPlayed, &isPending, &isBroken)
+		err := rows.Scan(&e.Username, &rating, &rd, &e.Wins, &e.Losses, &e.AvgMoves, &lastPlayed, &isPending, &isBroken, &e.FailureMessage)
 		if err != nil {
 			return nil, err
 		}
@@ -324,6 +330,11 @@ func AddMatch(player1ID, player2ID, winnerID, player1Wins, player2Wins, player1M
 
 func UpdateSubmissionStatus(id int, status string) error {
 	_, err := DB.Exec("UPDATE submissions SET status = ? WHERE id = ?", status, id)
+	return err
+}
+
+func UpdateSubmissionStatusWithMessage(id int, status string, message string) error {
+	_, err := DB.Exec("UPDATE submissions SET status = ?, failure_message = ? WHERE id = ?", status, message, id)
 	return err
 }
 

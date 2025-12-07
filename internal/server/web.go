@@ -750,13 +750,13 @@ const leaderboardHTML = `
                     {{range $i, $e := .Entries}}
                     <tr{{if $e.IsPending}} class="pending"{{else if $e.IsBroken}} class="broken"{{end}}>
                         <td class="rank rank-{{add $i 1}}">{{if $e.IsBroken}}💥{{else if $e.IsPending}}⏳{{else if lt $i 3}}{{medal $i}}{{else}}{{add $i 1}}{{end}}</td>
-                        <td class="player-name"><a href="/user/{{$e.Username}}" style="color: inherit; text-decoration: none;">{{$e.Username}}{{if $e.IsPending}} <span style="font-size: 0.8em;">(pending)</span>{{else if $e.IsBroken}} <span style="font-size: 0.8em; color: #ef4444;">(compilation failed)</span>{{end}}</a></td>
+                        <td class="player-name"><a href="/user/{{$e.Username}}" style="color: inherit; text-decoration: none;">{{$e.Username}}{{if $e.IsPending}} <span style="font-size: 0.8em;">(pending)</span>{{else if $e.IsBroken}} <span style="font-size: 0.8em; color: #ef4444;" title="{{$e.FailureMessage}}">(failed)</span>{{end}}</a></td>
                         <td>{{if or $e.IsPending $e.IsBroken}}-{{else}}<strong>{{$e.Rating}}</strong> <span style="color: #94a3b8; font-size: 0.85em;">±{{$e.RD}}</span>{{end}}</td>
                         <td>{{if or $e.IsPending $e.IsBroken}}-{{else}}{{$e.Wins}}{{end}}</td>
                         <td>{{if or $e.IsPending $e.IsBroken}}-{{else}}{{$e.Losses}}{{end}}</td>
                         <td>{{if or $e.IsPending $e.IsBroken}}-{{else}}<span class="win-rate {{winRateClass $e}}">{{winRate $e}}%</span>{{end}}</td>
                         <td>{{if or $e.IsPending $e.IsBroken}}-{{else}}{{printf "%.1f" $e.AvgMoves}}{{end}}</td>
-                        <td style="color: #64748b;">{{if $e.IsPending}}Waiting...{{else if $e.IsBroken}}Failed{{else}}{{$e.LastPlayed.Format "Jan 2, 3:04 PM"}}{{end}}</td>
+                        <td style="color: #64748b;">{{if $e.IsPending}}Waiting...{{else if $e.IsBroken}}<span title="{{$e.FailureMessage}}">Failed</span>{{else}}{{$e.LastPlayed.Format "Jan 2, 3:04 PM"}}{{end}}</td>
                     </tr>
                     {{end}}
                     {{else}}
