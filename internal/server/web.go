@@ -863,7 +863,7 @@ const leaderboardHTML = `
                             <td>-</td>
                             <td>-</td>
                             <td>-</td>
-                            <td style="color: #64748b;"><span title="{{$e.FailureMessage}}" style="cursor: help;">{{$e.FailureMessage}}</span></td>
+                            <td style="color: #64748b;">{{$e.FailureMessage}}</td>
                         </tr>
                         {{end}}
                     </tbody>
