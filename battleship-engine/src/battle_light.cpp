@@ -3,7 +3,7 @@
 // Date: November 2025
 // Purpose: Test smart battleship AI with benchmarking on non-Linux systems
 
-#include "battleship_light.h"
+#include "battleship.h"
 #include "memory.h"
 #include "memory_functions_klukas.h"
 #include <iostream>

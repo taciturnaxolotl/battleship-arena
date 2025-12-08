@@ -147,10 +147,8 @@ func CompileSubmission(sub storage.Submission, uploadDir string) error {
 		return err
 	}
 	
-	// Remove any #include "battleship.h" lines that conflict with battleship_light.h
-	inputStr := string(input)
-	inputStr = regexp.MustCompile(`(?m)^\s*#include\s+"battleship\.h"\s*$`).ReplaceAllString(inputStr, "")
-	input = []byte(inputStr)
+	// Students can now use #include "battleship.h" directly
+	// No need to remove it
 	
 	if err := os.WriteFile(dstPath, input, 0644); err != nil {
 		return err
@@ -253,7 +251,7 @@ func RunHeadToHead(player1, player2 storage.Submission, numGames int) (int, int,
 	compileArgs = append(compileArgs, "-std=c++11", "-O3",
 		"-o", combinedBinary,
 		mainPath,
-		filepath.Join(enginePath, "src", "battleship_light.cpp"),
+		filepath.Join(enginePath, "src", "battleship.cpp"),
 	)
 	
 	if prefix1 == prefix2 {
@@ -441,7 +439,7 @@ func generateHeader(filename, prefix string) string {
 #define %s
 
 #include "memory.h"
-#include "battleship_light.h"
+#include "battleship.h"
 #include <string>
 
 void initMemory%s(ComputerMemory &memory);
@@ -453,7 +451,7 @@ void updateMemory%s(int row, int col, int result, ComputerMemory &memory);
 }
 
 func generateMatchMain(prefix1, prefix2, suffix1, suffix2 string) string {
-	return fmt.Sprintf(`#include "battleship_light.h"
+	return fmt.Sprintf(`#include "battleship.h"
 #include "memory.h"
 #include "memory_functions_%s.h"
 #include "memory_functions_%s.h"

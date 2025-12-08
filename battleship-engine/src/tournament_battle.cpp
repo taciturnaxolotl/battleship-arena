@@ -1,7 +1,7 @@
 // Tournament battle runner - runs matches between two AI implementations
 // Outputs results in parseable format
 
-#include "battleship_light.h"
+#include "battleship.h"
 #include "memory.h"
 #include <iostream>
 #include <cstdlib>
