@@ -613,13 +613,16 @@ const leaderboardHTML = `
                     const data = JSON.parse(event.data);
                     console.log('SSE message received:', data);
                     
-                    // Check if it's a progress update or leaderboard update
+                    // Check message type
                     if (data.type === 'progress') {
                         console.log('Progress update:', data);
                         updateProgress(data);
                     } else if (data.type === 'complete') {
                         console.log('Progress complete');
                         hideProgress();
+                    } else if (data.type === 'status') {
+                        console.log('Status update:', data);
+                        updatePlayerStatus(data);
                     } else if (Array.isArray(data)) {
                         // Leaderboard update
                         console.log('Updating leaderboard with', data.length, 'entries');
@@ -734,6 +737,36 @@ const leaderboardHTML = `
             const indicator = document.getElementById('progress-indicator');
             if (indicator) {
                 indicator.classList.add('hidden');
+            }
+        }
+        
+        function updatePlayerStatus(data) {
+            // Find the player's row in the leaderboard
+            const rows = document.querySelectorAll('tbody tr');
+            for (const row of rows) {
+                const playerLink = row.querySelector('.player-name a');
+                if (!playerLink) continue;
+                
+                const username = playerLink.getAttribute('href').split('/').pop();
+                if (username === data.player) {
+                    const lastPlayedCell = row.cells[7]; // Last cell (Last Active)
+                    
+                    if (data.status === 'compiling') {
+                        lastPlayedCell.innerHTML = '<span style="color: #3b82f6;">⚙️ Compiling...</span>';
+                        row.classList.add('pending');
+                    } else if (data.status === 'compilation_failed') {
+                        lastPlayedCell.innerHTML = '<span style="color: #ef4444;" title="' + 
+                            (data.failure_message || 'Compilation failed') + '">❌ Failed</span>';
+                        row.classList.remove('pending');
+                    } else if (data.status === 'running_matches') {
+                        lastPlayedCell.innerHTML = '<span style="color: #10b981;">▶️ Running matches...</span>';
+                        row.classList.add('pending');
+                    } else if (data.status === 'completed') {
+                        // Will be updated by leaderboard refresh
+                        row.classList.remove('pending');
+                    }
+                    break;
+                }
             }
         }
         

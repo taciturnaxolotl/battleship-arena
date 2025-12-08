@@ -80,7 +80,7 @@ func main() {
 
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	defer workerCancel()
-	go runner.StartWorker(workerCtx, cfg.UploadDir, server.BroadcastProgress, server.NotifyLeaderboardUpdate, server.BroadcastProgressComplete)
+	go runner.StartWorker(workerCtx, cfg.UploadDir, server.BroadcastProgress, server.NotifyLeaderboardUpdate, server.BroadcastProgressComplete, server.BroadcastStatusUpdate)
 
 	toClient, fromClient := server.NewSCPHandlers(cfg.UploadDir)
 	sshServer, err := wish.NewServer(

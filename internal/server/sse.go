@@ -22,6 +22,8 @@ type ProgressUpdate struct {
 	EstimatedTimeLeft string   `json:"estimated_time_left,omitempty"`
 	PercentComplete   float64  `json:"percent_complete,omitempty"`
 	QueuedPlayers     []string `json:"queued_players,omitempty"`
+	Status            string   `json:"status,omitempty"`
+	FailureMessage    string   `json:"failure_message,omitempty"`
 }
 
 func InitSSE() {
@@ -112,5 +114,22 @@ func BroadcastProgressComplete() {
 	}
 	
 	// Silent - no log needed for routine completion
+	SSEServer.SendMessage("/events/updates", sse.SimpleMessage(string(data)))
+}
+
+func BroadcastStatusUpdate(player, status, failureMessage string) {
+	update := ProgressUpdate{
+		Type:           "status",
+		Player:         player,
+		Status:         status,
+		FailureMessage: failureMessage,
+	}
+	
+	data, err := json.Marshal(update)
+	if err != nil {
+		log.Printf("Failed to marshal status update: %v", err)
+		return
+	}
+	
 	SSEServer.SendMessage("/events/updates", sse.SimpleMessage(string(data)))
 }
