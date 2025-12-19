@@ -19,6 +19,7 @@
 #include <sstream>
 #include <cstdlib>
 #include <ctime>
+#include <chrono>
 #include <vector>
 #include <unistd.h>
 #include <sys/wait.h>
@@ -60,11 +61,11 @@ bool readLine(PlayerProcess &p, string &line, int timeoutMs) {
     pfd.fd = p.stdoutFd;
     pfd.events = POLLIN;
     
-    auto deadline = chrono::steady_clock::now() + chrono::milliseconds(timeoutMs);
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
     
     while (true) {
-        auto remaining = chrono::duration_cast<chrono::milliseconds>(
-            deadline - chrono::steady_clock::now()).count();
+        auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now()).count();
         if (remaining <= 0) return false;
         
         int ret = poll(&pfd, 1, remaining);
