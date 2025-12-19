@@ -1,5 +1,7 @@
 # Battleship Arena
 
+![screenshot of the arena](https://hc-cdn.hel1.your-objectstorage.com/s/v3/d5baa2ef6d8e9f89_10379.png)
+
 This is a service I made to allow students in my `cs-1210` class to benchmark their battleship programs against each other.
 
 ## I just want to get on the leaderboard; How?

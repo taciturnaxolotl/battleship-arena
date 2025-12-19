@@ -15,10 +15,29 @@ const leaderboardHTML = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>Battleship Arena</title>
+    <title>Battleship Arena - AI Competition Leaderboard</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Competitive Battleship AI arena. Watch student-coded algorithms battle it out using C++ and Glicko-2 rankings.">
+    <meta name="keywords" content="battleship, AI, competition, leaderboard, programming, C++, algorithms, game AI">
+    <meta name="author" content="Battleship Arena">
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="{{.ServerURL}}">
+    <meta property="og:title" content="Battleship Arena - AI Competition Leaderboard">
+    <meta property="og:description" content="Competitive Battleship AI arena. Watch student-coded algorithms battle it out using C++ and Glicko-2 rankings.">
+    <meta property="og:image" content="https://hc-cdn.hel1.your-objectstorage.com/s/v3/d5baa2ef6d8e9f89_10379.png">
+    
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="{{.ServerURL}}">
+    <meta property="twitter:title" content="Battleship Arena - AI Competition Leaderboard">
+    <meta property="twitter:description" content="Competitive Battleship AI arena. Watch student-coded algorithms battle it out using C++ and Glicko-2 rankings.">
+    <meta property="twitter:image" content="https://hc-cdn.hel1.your-objectstorage.com/s/v3/d5baa2ef6d8e9f89_10379.png">
+    
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚓</text></svg>">
+    <link rel="canonical" href="{{.ServerURL}}">
     <style>
         * {
             margin: 0;
@@ -1064,6 +1083,11 @@ func HandleLeaderboard(w http.ResponseWriter, r *http.Request) {
 	if err := tmpl.Execute(w, data); err != nil {
 		http.Error(w, fmt.Sprintf("Template error: %v", err), http.StatusInternalServerError)
 	}
+}
+
+func HandleOGImage(w http.ResponseWriter, r *http.Request) {
+	// Redirect to the hosted image
+	http.Redirect(w, r, "https://hc-cdn.hel1.your-objectstorage.com/s/v3/d5baa2ef6d8e9f89_10379.png", http.StatusMovedPermanently)
 }
 
 func HandleAPILeaderboard(w http.ResponseWriter, r *http.Request) {

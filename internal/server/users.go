@@ -60,11 +60,13 @@ func HandleUserProfile(w http.ResponseWriter, r *http.Request) {
 		Entry            *storage.LeaderboardEntry
 		Submissions      []storage.SubmissionWithStats
 		PublicKeyDisplay string
+		ServerURL        string
 	}{
 		User:             user,
 		Entry:            userEntry,
 		Submissions:      submissions,
 		PublicKeyDisplay: publicKeyDisplay,
+		ServerURL:        GetServerURL(),
 	}
 	tmpl.Execute(w, data)
 }
@@ -76,8 +78,16 @@ func HandleUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
+	data := struct {
+		Users     []storage.User
+		ServerURL string
+	}{
+		Users:     users,
+		ServerURL: GetServerURL(),
+	}
+	
 	tmpl := template.Must(template.New("users").Parse(usersListHTML))
-	tmpl.Execute(w, users)
+	tmpl.Execute(w, data)
 }
 
 func formatPublicKey(key string) string {
@@ -104,7 +114,24 @@ const userProfileHTML = `
     <title>{{.User.Name}} (@{{.User.Username}}) - Battleship Arena</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Profile for {{.User.Name}} (@{{.User.Username}}) - View their Battleship AI performance, ranking, and match history.">
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="profile">
+    <meta property="og:url" content="{{.ServerURL}}/user/{{.User.Username}}">
+    <meta property="og:title" content="{{.User.Name}} (@{{.User.Username}}) - Battleship Arena">
+    <meta property="og:description" content="View {{.User.Name}}'s Battleship AI performance and match history.">
+    <meta property="og:image" content="https://hc-cdn.hel1.your-objectstorage.com/s/v3/d5baa2ef6d8e9f89_10379.png">
+    
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary">
+    <meta property="twitter:url" content="{{.ServerURL}}/user/{{.User.Username}}">
+    <meta property="twitter:title" content="{{.User.Name}} (@{{.User.Username}}) - Battleship Arena">
+    <meta property="twitter:description" content="View {{.User.Name}}'s Battleship AI performance and match history.">
+    <meta property="twitter:image" content="https://hc-cdn.hel1.your-objectstorage.com/s/v3/d5baa2ef6d8e9f89_10379.png">
+    
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚓</text></svg>">
+    <link rel="canonical" href="{{.ServerURL}}/user/{{.User.Username}}">
     <style>
         * {
             margin: 0;
@@ -342,7 +369,24 @@ const usersListHTML = `
     <title>Users - Battleship Arena</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Browse all registered users and participants in the Battleship Arena AI competition.">
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="{{.ServerURL}}/users">
+    <meta property="og:title" content="Users - Battleship Arena">
+    <meta property="og:description" content="Browse all registered users and participants in the Battleship Arena AI competition.">
+    <meta property="og:image" content="https://hc-cdn.hel1.your-objectstorage.com/s/v3/d5baa2ef6d8e9f89_10379.png">
+    
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary">
+    <meta property="twitter:url" content="{{.ServerURL}}/users">
+    <meta property="twitter:title" content="Users - Battleship Arena">
+    <meta property="twitter:description" content="Browse all registered users and participants in the Battleship Arena AI competition.">
+    <meta property="twitter:image" content="https://hc-cdn.hel1.your-objectstorage.com/s/v3/d5baa2ef6d8e9f89_10379.png">
+    
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚓</text></svg>">
+    <link rel="canonical" href="{{.ServerURL}}/users">
     <style>
         * {
             margin: 0;
@@ -430,10 +474,10 @@ const usersListHTML = `
     <div class="container">
         <a href="/" class="back-link">← Back to Leaderboard</a>
         <h1>Players</h1>
-        <p style="color: #94a3b8; margin-bottom: 2rem;">{{len .}} registered users</p>
+        <p style="color: #94a3b8; margin-bottom: 2rem;">{{len .Users}} registered users</p>
         
         <div class="users-grid">
-            {{range .}}
+            {{range .Users}}
             <a href="/user/{{.Username}}" class="user-card">
                 <div class="user-name">{{.Name}}</div>
                 <div class="user-handle">@{{.Username}}</div>

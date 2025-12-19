@@ -139,6 +139,7 @@ func main() {
 	r.Get("/play/{aiName}", server.HandlePlayPage)
 	r.Get("/api/available-ais", server.HandleAvailableAIs)
 	r.HandleFunc("/ws/game", game.HandleGameWebSocket)
+	r.Get("/og-image.png", server.HandleOGImage)
 	r.Get("/", server.HandleLeaderboard)
 
 	log.Println("Server running at " + cfg.ExternalURL)
