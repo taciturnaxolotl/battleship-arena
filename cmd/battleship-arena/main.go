@@ -19,6 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	
+	"battleship-arena/internal/game"
 	"battleship-arena/internal/runner"
 	"battleship-arena/internal/server"
 	"battleship-arena/internal/storage"
@@ -78,6 +79,9 @@ func main() {
 	server.InitSSE()
 	server.SetConfig(cfg.AdminPasscode, cfg.ExternalURL)
 
+	// Start game cleanup worker
+	game.Manager.StartCleanupWorker()
+
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	defer workerCancel()
 	go runner.StartWorker(workerCtx, cfg.UploadDir, server.BroadcastProgress, server.NotifyLeaderboardUpdate, server.BroadcastProgressComplete, server.BroadcastStatusUpdate)
@@ -131,6 +135,10 @@ func main() {
 	r.Get("/player/{player}", server.HandlePlayerPage)
 	r.Get("/user/{username}", server.HandleUserProfile)
 	r.Get("/users", server.HandleUsers)
+	r.Get("/play", server.HandlePlayPage)
+	r.Get("/play/{aiName}", server.HandlePlayPage)
+	r.Get("/api/available-ais", server.HandleAvailableAIs)
+	r.HandleFunc("/ws/game", game.HandleGameWebSocket)
 	r.Get("/", server.HandleLeaderboard)
 
 	log.Println("Server running at " + cfg.ExternalURL)

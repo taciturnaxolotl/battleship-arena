@@ -70,6 +70,9 @@ github.com/go-chi/chi/v5/middleware
 # github.com/go-logfmt/logfmt v0.6.0
 ## explicit; go 1.17
 github.com/go-logfmt/logfmt
+# github.com/gorilla/websocket v1.5.3
+## explicit; go 1.12
+github.com/gorilla/websocket
 # github.com/kr/fs v0.1.0
 ## explicit
 github.com/kr/fs

@@ -248,6 +248,24 @@ const leaderboardHTML = `
             color: #ef4444;
         }
         
+        .play-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            background: rgba(59, 130, 246, 0.1);
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 1.25rem;
+            transition: all 0.2s;
+        }
+        
+        .play-btn:hover {
+            background: rgba(59, 130, 246, 0.3);
+            transform: scale(1.1);
+        }
+        
         .info-card {
             background: #1e293b;
             border: 1px solid #334155;
@@ -845,6 +863,7 @@ const leaderboardHTML = `
                         <th>Win Rate</th>
                         <th><span class="tooltip" data-tooltip="Average moves to win (lower is better)">Avg Moves</span></th>
                         <th>Last Active</th>
+                        <th>Play</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -859,11 +878,12 @@ const leaderboardHTML = `
                         <td>{{if $e.IsPending}}-{{else}}<span class="win-rate {{winRateClass $e}}">{{winRate $e}}%</span>{{end}}</td>
                         <td>{{if $e.IsPending}}-{{else}}{{printf "%.1f" $e.AvgMoves}}{{end}}</td>
                         <td style="color: #64748b;">{{if $e.IsPending}}Waiting...{{else}}{{$e.LastPlayed.Format "Jan 2, 3:04 PM"}}{{end}}</td>
+                        <td>{{if and (not $e.IsPending) (not $e.IsBroken) $e.AIName}}<a href="/play/{{$e.AIName}}" class="play-btn" title="Play against {{$e.Username}}">🎮</a>{{else}}-{{end}}</td>
                     </tr>
                     {{end}}
                     {{else}}
                     <tr>
-                        <td colspan="8">
+                        <td colspan="9">
                             <div class="empty-state">
                                 <div class="empty-state-icon">🎯</div>
                                 <div>No submissions yet. Be the first to compete!</div>

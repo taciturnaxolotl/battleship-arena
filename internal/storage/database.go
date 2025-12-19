@@ -23,6 +23,7 @@ type LeaderboardEntry struct {
 	IsPending      bool
 	IsBroken       bool
 	FailureMessage string
+	AIName         string // extracted from filename (e.g., "klukas" from "memory_functions_klukas.cpp")
 }
 
 type Submission struct {
@@ -208,11 +209,12 @@ func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		MAX(m.timestamp) as last_played,
 		0 as is_pending,
 		0 as is_broken,
-		'' as failure_message
+		'' as failure_message,
+		s.filename
 	FROM submissions s
 	LEFT JOIN matches m ON (m.player1_id = s.id OR m.player2_id = s.id) AND m.is_valid = 1
 	WHERE s.is_active = 1 AND s.status NOT IN ('compilation_failed', 'match_failed')
-	GROUP BY s.username, s.glicko_rating, s.glicko_rd
+	GROUP BY s.username, s.glicko_rating, s.glicko_rd, s.filename
 	HAVING COUNT(m.id) > 0
 	
 	UNION ALL
@@ -227,11 +229,12 @@ func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		s.upload_time as last_played,
 		1 as is_pending,
 		0 as is_broken,
-		'' as failure_message
+		'' as failure_message,
+		s.filename
 	FROM submissions s
 	LEFT JOIN matches m ON (m.player1_id = s.id OR m.player2_id = s.id) AND m.is_valid = 1
 	WHERE s.is_active = 1 AND s.status IN ('pending', 'testing', 'completed')
-	GROUP BY s.username, s.upload_time
+	GROUP BY s.username, s.upload_time, s.filename
 	HAVING COUNT(m.id) = 0
 	
 	UNION ALL
@@ -246,7 +249,8 @@ func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		s.upload_time as last_played,
 		0 as is_pending,
 		1 as is_broken,
-		COALESCE(s.failure_message, '') as failure_message
+		COALESCE(s.failure_message, '') as failure_message,
+		s.filename
 	FROM submissions s
 	WHERE s.is_active = 1 AND s.status IN ('compilation_failed', 'match_failed')
 	
@@ -266,7 +270,8 @@ func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		var lastPlayed string
 		var rating, rd float64
 		var isPending, isBroken int
-		err := rows.Scan(&e.Username, &rating, &rd, &e.Wins, &e.Losses, &e.AvgMoves, &lastPlayed, &isPending, &isBroken, &e.FailureMessage)
+		var filename string
+		err := rows.Scan(&e.Username, &rating, &rd, &e.Wins, &e.Losses, &e.AvgMoves, &lastPlayed, &isPending, &isBroken, &e.FailureMessage, &filename)
 		if err != nil {
 			return nil, err
 		}
@@ -275,6 +280,9 @@ func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 		e.RD = int(rd)
 		e.IsPending = isPending == 1
 		e.IsBroken = isBroken == 1
+		
+		// Extract AI name from filename (e.g., "memory_functions_klukas.cpp" -> "klukas")
+		e.AIName = extractAIName(filename)
 		
 		totalGames := e.Wins + e.Losses
 		if totalGames > 0 {
@@ -286,6 +294,22 @@ func GetLeaderboard(limit int) ([]LeaderboardEntry, error) {
 	}
 
 	return entries, rows.Err()
+}
+
+func extractAIName(filename string) string {
+	// Extract AI name from "memory_functions_NAME.cpp"
+	if len(filename) < 22 {
+		return ""
+	}
+	// Remove "memory_functions_" prefix and ".cpp" suffix
+	name := filename
+	if len(name) > 17 && name[:17] == "memory_functions_" {
+		name = name[17:]
+	}
+	if len(name) > 4 && name[len(name)-4:] == ".cpp" {
+		name = name[:len(name)-4]
+	}
+	return name
 }
 
 func AddSubmission(username, filename string) (int64, error) {
