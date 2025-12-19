@@ -122,6 +122,38 @@ func runSandboxed(ctx context.Context, name string, args []string, timeoutSec in
 	return output, err
 }
 
+// ensureArenaBuilt compiles the arena binary if it doesn't exist
+func ensureArenaBuilt() error {
+	buildDir := filepath.Join(enginePath, "build")
+	arenaBinary := filepath.Join(buildDir, "arena")
+	
+	// Check if arena binary exists
+	if _, err := os.Stat(arenaBinary); err == nil {
+		return nil
+	}
+	
+	os.MkdirAll(buildDir, 0755)
+	
+	srcDir := filepath.Join(enginePath, "src")
+	
+	compileArgs := []string{
+		"g++", "-std=c++11", "-O3",
+		"-I", srcDir,
+		"-o", arenaBinary,
+		filepath.Join(srcDir, "arena.cpp"),
+		filepath.Join(srcDir, "battleship.cpp"),
+	}
+	
+	log.Printf("Building arena binary...")
+	output, err := runSandboxed(context.Background(), "build-arena", compileArgs, 120)
+	if err != nil {
+		return fmt.Errorf("failed to build arena: %s", output)
+	}
+	
+	log.Printf("Arena binary built successfully")
+	return nil
+}
+
 func CompileSubmission(sub storage.Submission, uploadDir string) error {
 	storage.UpdateSubmissionStatus(sub.ID, "testing")
 
@@ -147,9 +179,6 @@ func CompileSubmission(sub storage.Submission, uploadDir string) error {
 		return err
 	}
 	
-	// Students can now use #include "battleship.h" directly
-	// No need to remove it
-	
 	if err := os.WriteFile(dstPath, input, 0644); err != nil {
 		return err
 	}
@@ -168,25 +197,37 @@ func CompileSubmission(sub storage.Submission, uploadDir string) error {
 		return err
 	}
 
-	log.Printf("Compiling submission %d for %s", sub.ID, prefix)
+	// Compile player wrapper binary (isolated process for this AI)
+	playerBinary := filepath.Join(buildDir, "ai_"+prefix)
 	
-	// Compile in sandbox with 60 second timeout
+	log.Printf("Compiling isolated player binary for %s", prefix)
+	
 	compileArgs := []string{
-		"g++", "-std=c++11", "-c", "-O3",
-		"-I", filepath.Join(enginePath, "src"),
-		"-o", filepath.Join(buildDir, "ai_"+prefix+".o"),
-		filepath.Join(enginePath, "src", sub.Filename),
+		"g++", "-std=c++11", "-O3",
+		"-I", srcDir,
+		fmt.Sprintf("-DPLAYER_SUFFIX=%s", functionSuffix),
+		fmt.Sprintf(`-DPLAYER_HEADER="memory_functions_%s.h"`, prefix),
+		"-o", playerBinary,
+		filepath.Join(srcDir, "player_wrapper.cpp"),
+		filepath.Join(srcDir, "battleship.cpp"),
+		filepath.Join(srcDir, fmt.Sprintf("memory_functions_%s.cpp", prefix)),
 	}
 	
-	output, err := runSandboxed(context.Background(), "compile-"+prefix, compileArgs, 60)
+	output, err := runSandboxed(context.Background(), "compile-"+prefix, compileArgs, 120)
 	if err != nil {
 		return fmt.Errorf("compilation failed: %s", output)
 	}
 
+	log.Printf("Player binary compiled: %s", playerBinary)
 	return nil
 }
 
 func RunHeadToHead(player1, player2 storage.Submission, numGames int) (int, int, int, string) {
+	// Ensure arena is built
+	if err := ensureArenaBuilt(); err != nil {
+		return 0, 0, 0, fmt.Sprintf("Failed to build arena: %v", err)
+	}
+	
 	re := regexp.MustCompile(`memory_functions_(\w+)\.cpp`)
 	matches1 := re.FindStringSubmatch(player1.Filename)
 	matches2 := re.FindStringSubmatch(player2.Filename)
@@ -198,96 +239,33 @@ func RunHeadToHead(player1, player2 storage.Submission, numGames int) (int, int,
 	prefix1 := matches1[1]
 	prefix2 := matches2[1]
 	
-	cpp1Path := filepath.Join(enginePath, "src", player1.Filename)
-	cpp2Path := filepath.Join(enginePath, "src", player2.Filename)
-	
-	// Ensure both files exist in engine/src (copy from uploads if missing)
-	if _, err := os.Stat(cpp1Path); os.IsNotExist(err) {
-		log.Printf("Player1 file missing in engine/src, skipping: %s", cpp1Path)
-		return 0, 0, 0, fmt.Sprintf("File missing: %s", cpp1Path)
-	}
-	
-	if _, err := os.Stat(cpp2Path); os.IsNotExist(err) {
-		log.Printf("Player2 file missing in engine/src, skipping: %s", cpp2Path)
-		return 0, 0, 0, fmt.Sprintf("Opponent file missing: %s", cpp2Path)
-	}
-	
-	cpp1Content, err := os.ReadFile(cpp1Path)
-	if err != nil {
-		log.Printf("Failed to read %s: %v", cpp1Path, err)
-		return 0, 0, 0, fmt.Sprintf("Failed to read file: %v", err)
-	}
-	
-	cpp2Content, err := os.ReadFile(cpp2Path)
-	if err != nil {
-		log.Printf("Failed to read %s: %v", cpp2Path, err)
-		return 0, 0, 0, fmt.Sprintf("Failed to read opponent file: %v", err)
-	}
-	
-	suffix1, err := parseFunctionNames(string(cpp1Content))
-	if err != nil {
-		log.Printf("Failed to parse function names for %s: %v", player1.Filename, err)
-		return 0, 0, 0, fmt.Sprintf("Could not find required function signatures (initMemory, smartMove, updateMemory)")
-	}
-	
-	suffix2, err := parseFunctionNames(string(cpp2Content))
-	if err != nil {
-		log.Printf("Failed to parse function names for %s: %v", player2.Filename, err)
-		return 0, 0, 0, fmt.Sprintf("Opponent file parse error: %v", err)
-	}
-	
 	buildDir := filepath.Join(enginePath, "build")
-	combinedBinary := filepath.Join(buildDir, fmt.Sprintf("match_%s_vs_%s", prefix1, prefix2))
+	arenaBinary := filepath.Join(buildDir, "arena")
+	player1Binary := filepath.Join(buildDir, "ai_"+prefix1)
+	player2Binary := filepath.Join(buildDir, "ai_"+prefix2)
 	
-	mainContent := generateMatchMain(prefix1, prefix2, suffix1, suffix2)
-	mainPath := filepath.Join(enginePath, "src", fmt.Sprintf("match_%s_vs_%s.cpp", prefix1, prefix2))
-	if err := os.WriteFile(mainPath, []byte(mainContent), 0644); err != nil {
-		log.Printf("Failed to write match main: %v", err)
-		return 0, 0, 0, fmt.Sprintf("Failed to write match file: %v", err)
+	// Check binaries exist
+	if _, err := os.Stat(player1Binary); os.IsNotExist(err) {
+		return 0, 0, 0, fmt.Sprintf("Player 1 binary missing: %s", player1Binary)
 	}
 	
-	// Compile match binary in sandbox with 120 second timeout
-	compileArgs := []string{"g++"}
-	compileArgs = append(compileArgs, "-std=c++11", "-O3",
-		"-o", combinedBinary,
-		mainPath,
-		filepath.Join(enginePath, "src", "battleship.cpp"),
-	)
-	
-	if prefix1 == prefix2 {
-		compileArgs = append(compileArgs, filepath.Join(enginePath, "src", fmt.Sprintf("memory_functions_%s.cpp", prefix1)))
-	} else {
-		compileArgs = append(compileArgs,
-			filepath.Join(enginePath, "src", fmt.Sprintf("memory_functions_%s.cpp", prefix1)),
-			filepath.Join(enginePath, "src", fmt.Sprintf("memory_functions_%s.cpp", prefix2)),
-		)
+	if _, err := os.Stat(player2Binary); os.IsNotExist(err) {
+		return 0, 0, 0, fmt.Sprintf("Player 2 binary missing: %s", player2Binary)
 	}
 	
-	output, err := runSandboxed(context.Background(), "compile-match", compileArgs, 120)
-	if err != nil {
-		log.Printf("Failed to compile match binary (err=%v): %s", err, output)
-		return 0, 0, 0, fmt.Sprintf("Compilation error: %s", string(output))
-	}
+	// Run arena with both player binaries
+	// Arena spawns each player in its own isolated process
+	runArgs := []string{arenaBinary, strconv.Itoa(numGames), player1Binary, player2Binary}
 	
-	log.Printf("Match compilation output: %s", output)
+	log.Printf("Running isolated match: %s vs %s (%d games)", prefix1, prefix2, numGames)
 	
-	// Check if binary was actually created
-	if _, err := os.Stat(combinedBinary); os.IsNotExist(err) {
-		log.Printf("Match binary was not created at %s, compilation succeeded but no binary found", combinedBinary)
-		return 0, 0, 0, "Match binary not created after compilation"
-	}
-	
-	// Run match in sandbox with 300 second timeout (1000 games should be ~60s, give headroom)
-	runArgs := []string{combinedBinary, strconv.Itoa(numGames)}
-	output, err = runSandboxed(context.Background(), "run-match", runArgs, 300)
+	output, err := runSandboxed(context.Background(), "run-match", runArgs, 600)
 	if err != nil {
 		log.Printf("Match execution failed: %v\n%s", err, output)
 		errMsg := strings.TrimSpace(string(output))
 		if errMsg != "" {
-			// If there's output, show it along with the exit status
 			return 0, 0, 0, fmt.Sprintf("Runtime error: %s (%s)", errMsg, err.Error())
 		}
-		// If no output, just show the error
 		return 0, 0, 0, fmt.Sprintf("Runtime error: %s", err.Error())
 	}
 	
@@ -315,7 +293,7 @@ func RunRoundRobinMatches(newSub storage.Submission, uploadDir string, broadcast
 		}
 		
 		if !hasMatch {
-			// Ensure opponent file exists in engine/src
+			// Ensure opponent file exists in engine/src and is compiled
 			opponentSrcPath := filepath.Join(uploadDir, opponent.Username, opponent.Filename)
 			opponentDstPath := filepath.Join(enginePath, "src", opponent.Filename)
 			
@@ -342,6 +320,21 @@ func RunRoundRobinMatches(newSub storage.Submission, uploadDir string, broadcast
 						headerPath := filepath.Join(enginePath, "src", headerFilename)
 						headerContent := generateHeader(headerFilename, functionSuffix)
 						os.WriteFile(headerPath, []byte(headerContent), 0644)
+					}
+				}
+			}
+			
+			// Ensure opponent binary is compiled
+			re := regexp.MustCompile(`memory_functions_(\w+)\.cpp`)
+			matches := re.FindStringSubmatch(opponent.Filename)
+			if len(matches) >= 2 {
+				prefix := matches[1]
+				playerBinary := filepath.Join(enginePath, "build", "ai_"+prefix)
+				if _, err := os.Stat(playerBinary); os.IsNotExist(err) {
+					// Compile opponent
+					if err := CompileSubmission(opponent, uploadDir); err != nil {
+						log.Printf("Failed to compile opponent %s: %v", opponent.Username, err)
+						continue
 					}
 				}
 			}
@@ -448,112 +441,6 @@ void updateMemory%s(int row, int col, int result, ComputerMemory &memory);
 
 #endif
 `, guard, guard, prefix, prefix, prefix)
-}
-
-func generateMatchMain(prefix1, prefix2, suffix1, suffix2 string) string {
-	return fmt.Sprintf(`#include "battleship.h"
-#include "memory.h"
-#include "memory_functions_%s.h"
-#include "memory_functions_%s.h"
-#include <iostream>
-#include <cstdlib>
-#include <ctime>
-
-using namespace std;
-
-struct MatchResult {
-    int player1Wins = 0;
-    int player2Wins = 0;
-    int ties = 0;
-    int totalMoves = 0;
-};
-
-MatchResult runMatch(int numGames) {
-    MatchResult result;
-    srand(time(NULL));
-    
-    for (int game = 0; game < numGames; game++) {
-        Board board1, board2;
-        ComputerMemory memory1, memory2;
-        
-        initializeBoard(board1);
-        initializeBoard(board2);
-        initMemory%s(memory1);
-        initMemory%s(memory2);
-        
-        int shipsSunk1 = 0;
-        int shipsSunk2 = 0;
-        int moveCount = 0;
-        
-        while (true) {
-            moveCount++;
-            
-            string move1 = smartMove%s(memory1);
-            int row1, col1;
-            int check1 = checkMove(move1, board2, row1, col1);
-            while (check1 != VALID_MOVE) {
-                move1 = randomMove();
-                check1 = checkMove(move1, board2, row1, col1);
-            }
-            
-            string move2 = smartMove%s(memory2);
-            int row2, col2;
-            int check2 = checkMove(move2, board1, row2, col2);
-            while (check2 != VALID_MOVE) {
-                move2 = randomMove();
-                check2 = checkMove(move2, board1, row2, col2);
-            }
-            
-            int result1 = playMove(row1, col1, board2);
-            int result2 = playMove(row2, col2, board1);
-            
-            updateMemory%s(row1, col1, result1, memory1);
-            updateMemory%s(row2, col2, result2, memory2);
-            
-            if (isASunk(result1)) shipsSunk1++;
-            if (isASunk(result2)) shipsSunk2++;
-            
-            if (shipsSunk1 == 5 || shipsSunk2 == 5) {
-                break;
-            }
-        }
-        
-        result.totalMoves += moveCount;
-        
-        if (shipsSunk1 == 5 && shipsSunk2 == 5) {
-            result.ties++;
-        } else if (shipsSunk1 == 5) {
-            result.player1Wins++;
-        } else {
-            result.player2Wins++;
-        }
-    }
-    
-    return result;
-}
-
-int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        cerr << "Usage: " << argv[0] << " <num_games>" << endl;
-        return 1;
-    }
-    
-    int numGames = atoi(argv[1]);
-    if (numGames <= 0) numGames = 10;
-    
-    setDebugMode(false);
-    
-    MatchResult result = runMatch(numGames);
-    
-    cout << "PLAYER1_WINS=" << result.player1Wins << endl;
-    cout << "PLAYER2_WINS=" << result.player2Wins << endl;
-    cout << "TIES=" << result.ties << endl;
-    cout << "TOTAL_MOVES=" << result.totalMoves << endl;
-    cout << "AVG_MOVES=" << (result.totalMoves / numGames) << endl;
-    
-    return 0;
-}
-`, prefix1, prefix2, suffix1, suffix2, suffix1, suffix2, suffix1, suffix2)
 }
 
 func parseMatchOutput(output string) (int, int, int) {
